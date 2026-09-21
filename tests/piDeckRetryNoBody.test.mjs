@@ -54,7 +54,7 @@ const TRANSIENT_UPSTREAM_PATTERNS = [
 	/请稍后重试|请稍后再试|稍后重试|稍后再试|请重试|请重新尝试/,
 ];
 
-const TRANSIENT_TRANSPORT_PATTERNS = [/^stream_read_error$/i, /unexpected\s+eof/i, /premature\s+close/i, /upstream\s+request\s+failed/i, /no\s+available\s+channel/i, /GOAWAY/i];
+const TRANSIENT_TRANSPORT_PATTERNS = [/^stream_read_error$/i, /unexpected\s+eof/i, /premature\s+close/i, /upstream\s+request\s+failed/i, /no\s+available\s+channel/i, /GOAWAY/i, /\btemporarily\s+unavailable\b/i, /bad_response_status_code/i, /\bopenai_error\b/i];
 
 const ALREADY_RETRYABLE_SIGNALS = [/\b(?:429|500|502|503|504|524)\b/, /rate.?limit|too many requests|overloaded/i, /service.?unavailable|server.?error|internal.?error/i, /timed?\s*out|timeout|terminated/i, /connection.?error|socket hang up|fetch failed/i];
 
@@ -369,6 +369,50 @@ test("传输层瞬态错误改写后进入 pi 重试闭环", () => {
 	}
 });
 
+/**
+ * 2026-09 回归：中转网关（pt / cn.pptoken.cc）的两类漏网瞬态错误。
+ * 实测会话 `2026-09-21T03-39-48-436Z_*.jsonl` 里同名错误各出现多次（网关自造错误码，
+ * 不含任何状态码），pi 名单与扩展名单都不命中，会话直接停在错误上，
+ * 用户只能手打「继续」——本组用例锁定这两类必须重试。
+ */
+test("网关 `unknown: Service temporarily unavailable` 原本不重试，改写后可重试", () => {
+	const errorMessage = "unknown: Service temporarily unavailable (request id: 202609210515454243107188268d9d6XDvPqbgk)";
+	const message = { stopReason: "error", errorMessage, api: "openai-responses" };
+	// 改写前：pi 名单只认连写的 service.?unavailable，中间的 temporarily 打断匹配
+	assert.equal(piWillRetry(message), false);
+
+	const rewritten = rewriteErrorMessage(message);
+	assert.equal(rewritten, `${errorMessage} (connection error)`);
+	assert.equal(piWillRetry({ ...message, errorMessage: rewritten }), true);
+	// 原文与 request id 完整保留，会话历史仍可追查
+	assert.match(rewritten, /request id: 202609210515454243107188268d9d6XDvPqbgk/);
+});
+
+test("网关 `bad_response_status_code: openai_error` 原本不重试，改写后可重试", () => {
+	const errorMessage = "bad_response_status_code: openai_error (request id: 202609210340445513749788268d9d6G8jME6oG)";
+	const message = { stopReason: "error", errorMessage, api: "openai-responses" };
+	assert.equal(piWillRetry(message), false);
+
+	const rewritten = rewriteErrorMessage(message);
+	assert.equal(rewritten, `${errorMessage} (connection error)`);
+	assert.equal(piWillRetry({ ...message, errorMessage: rewritten }), true);
+});
+
+test("带真实 4xx 的同名错误码不被救活（黑名单优先于新增模式）", () => {
+	// 新增的 bad_response_status_code / openai_error 模式不能被当作跳过 4xx 黑名单的旁路
+	for (const errorMessage of ['400: {"type":"openai_error","message":"bad_response_status_code"}', "OpenAI API error (403): openai_error", "413: bad_response_status_code"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-responses" };
+		assert.equal(rewriteErrorMessage(message), undefined, `不应改写: ${errorMessage}`);
+	}
+});
+
+test("新增模式不被用户中止/额度类文案误命中", () => {
+	for (const errorMessage of ["Request aborted", "insufficient_quota", "您已达到每周/每月使用上限"]) {
+		const message = { stopReason: "error", errorMessage, api: "openai-responses" };
+		assert.equal(rewriteErrorMessage(message), undefined, `不应改写: ${errorMessage}`);
+	}
+});
+
 test("带 4xx 的文案不改写——即便含 Upstream request failed 字样", () => {
 	// 真实误伤案例：含 transport 关键词，但真实原因是 403 region 限制 / 400 参数非法
 	for (const errorMessage of [
@@ -426,6 +470,33 @@ test("泛化错误不改写（信息不足，宁可漏判）", () => {
 
 const extensionSource = readFileSync("resources/extensions/pi-deck-retry-no-body.ts", "utf8");
 const builtInsSource = readFileSync("src/main/extensions/builtInExtensions.ts", "utf8");
+const testSource = readFileSync("tests/piDeckRetryNoBody.test.mjs", "utf8");
+
+test("扩展的模式表与测试内联副本逐条一致（防漂移）", () => {
+	// 内联副本是弱约束：改了扩展忘了同步副本，本文件的用例会全绿而真实扩展已分歧。
+	// 这里按正则字面量逐条比对两个模式表，字面量不一致即失败。
+	const extract = (source, marker) => {
+		const start = source.indexOf(marker);
+		const end = source.indexOf("];", start);
+		assert.ok(start !== -1 && end !== -1, `找不到 ${marker}`);
+		// 剔除行注释后抽取正则字面量（注释里出现的 `//` 分隔符不参与比对）
+		const code = source
+			.slice(start, end)
+			.split("\n")
+			.map((line) => line.replace(/\/\/.*$/, ""))
+			.join("\n");
+		return code.match(/\/(?:\\.|\[[^\]]*\]|[^/\\])+\/[a-z]*/g) ?? [];
+	};
+
+	const markers = ["TRANSIENT_TRANSPORT_PATTERNS", "TRANSIENT_UPSTREAM_PATTERNS", "TRANSIENT_OVERLOAD_PATTERNS", "NON_RETRYABLE_LOCALIZED_PATTERNS", "ALREADY_RETRYABLE_SIGNALS"];
+	for (const name of markers) {
+		const fromExtension = extract(extensionSource, `const ${name}`);
+		const fromTest = extract(testSource, `const ${name}`);
+		assert.ok(fromExtension.length > 0, `扩展应定义 ${name}`);
+		assert.ok(fromTest.length > 0, `测试应内联 ${name}`);
+		assert.deepEqual(fromTest, fromExtension, `${name} 的内联副本与扩展不一致，请同步本测试文件`);
+	}
+});
 
 test("扩展注册了 message_end 拦截与纯函数", () => {
 	assert.match(extensionSource, /pi\.on\("message_end"/);

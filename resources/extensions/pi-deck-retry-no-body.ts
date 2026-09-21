@@ -117,6 +117,16 @@ const TRANSIENT_TRANSPORT_PATTERNS: RegExp[] = [
 	/upstream\s+request\s+failed/i,
 	/no\s+available\s+channel/i,
 	/GOAWAY/i,
+	// 网关把上游异常包成自己的错误体（pt/cn.pptoken.cc 实测）：
+	// `unknown: Service temporarily unavailable (request id: ...)` —— 只含
+	// `temporarily unavailable`，而 pi 名单只认连写的 `service.?unavailable`，
+	// 中间的 `temporarily ` 恰好打断匹配，于是既不重试也不被扩展救回。
+	/\btemporarily\s+unavailable\b/i,
+	// `bad_response_status_code: openai_error (request id: ...)`——中转网关
+	// 不转发上游状态码，只给自造的错误码；重发即成功（同一会话内反复出现）。
+	// 这两个词只有网关自身会输出，不会出现在真实模型回复中。
+	/bad_response_status_code/i,
+	/\bopenai_error\b/i,
 ];
 
 /**

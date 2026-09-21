@@ -93,6 +93,11 @@ export type SessionToolAction = {
 	label: string;
 	icon: ReactNode;
 	active?: boolean;
+	/**
+	 * true = 以图标按钮常驻在「更多操作」左侧（高频、一眼可见）；
+	 * false/缺省 = 收进「更多操作」菜单（低频，或需要鼠标坐标定位弹层的动作）。
+	 */
+	inline?: boolean;
 	/** 参数放宽到 HTMLElement：按钮既可直渲染也可作为下拉菜单项挂载。 */
 	onClick: (event: React.MouseEvent<HTMLElement>) => void;
 };
@@ -572,14 +577,22 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 				{tabsOverflow && <div aria-hidden="true" className="pointer-events-none absolute inset-y-0 right-0 z-10 w-6 bg-gradient-to-l from-background/90 to-transparent" />}
 			</div>
 			{/* 右侧抽屉总开关：固定在会话 Tab 栏最右侧；面板切换图标在抽屉内活动栏。
-          ⋯ 菜单收运行控制（当前会话）与工具开关两组（新建会话保留独立「+」按钮）；
+          ⋯ 菜单收运行控制（当前会话）与未常驻的工具开关两组（新建会话保留独立「+」按钮）；
           Tab 级操作（固定/关闭等）保留在 Tab 右键菜单。 */}
 			{props.onToggleDrawer || props.actions != null || (props.toolActions && props.toolActions.length > 0) || props.runControl || props.sessionActions ? (
 				<div className="session-tabs-actions flex shrink-0 items-center gap-1 border-l border-border/30 pl-1">
 					{props.actions}
+					{/* 常驻工具图标（草稿本/终端等高频开关）：直接露出，不用先进 ⋯ 菜单再点一次。 */}
+					{props.toolActions
+						?.filter((action) => action.inline)
+						.map((action) => (
+							<Button key={action.id} type="button" variant="ghost" size="icon-sm" className={`session-tabs-tool-inline size-7${action.active ? " text-[var(--color-accent)]" : ""}`} title={action.label} aria-label={action.label} aria-pressed={action.active === true} onClick={action.onClick}>
+								{action.icon}
+							</Button>
+						))}
 					<DropdownMenu>
 						<DropdownMenuTrigger asChild>
-							<Button type="button" variant="ghost" size="icon-sm" className={`size-7${props.toolActions?.some((action) => action.active) ? " text-[var(--color-accent)]" : ""}`} title={t("tabs.moreActions")} aria-label={t("tabs.moreActions")}>
+							<Button type="button" variant="ghost" size="icon-sm" className={`size-7${props.toolActions?.some((action) => !action.inline && action.active) ? " text-[var(--color-accent)]" : ""}`} title={t("tabs.moreActions")} aria-label={t("tabs.moreActions")}>
 								<MoreHorizontal className="size-3.5" aria-hidden="true" />
 							</Button>
 						</DropdownMenuTrigger>
@@ -657,17 +670,19 @@ export function SessionTabsBar(props: SessionTabsBarProps) {
 									</DropdownMenuItem>
 								</>
 							)}
-							{props.toolActions && props.toolActions.length > 0 && (
+							{props.toolActions && props.toolActions.some((action) => !action.inline) && (
 								<>
 									<DropdownMenuSeparator />
 									<DropdownMenuLabel>{t("tabs.toolsGroup")}</DropdownMenuLabel>
-									{props.toolActions.map((action) => (
-										<DropdownMenuItem key={action.id} onClick={action.onClick}>
-											{action.icon}
-											<span>{action.label}</span>
-											{action.active ? <Check className="ml-auto size-3.5 text-[var(--color-accent)]" aria-hidden="true" /> : null}
-										</DropdownMenuItem>
-									))}
+									{props.toolActions
+										.filter((action) => !action.inline)
+										.map((action) => (
+											<DropdownMenuItem key={action.id} onClick={action.onClick}>
+												{action.icon}
+												<span>{action.label}</span>
+												{action.active ? <Check className="ml-auto size-3.5 text-[var(--color-accent)]" aria-hidden="true" /> : null}
+											</DropdownMenuItem>
+										))}
 								</>
 							)}
 						</DropdownMenuContent>

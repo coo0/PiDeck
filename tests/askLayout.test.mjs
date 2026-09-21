@@ -13,8 +13,10 @@ const sessionTimeline = readFileSync("src/renderer/src/components/session/Sessio
  */
 test("composer keeps the editor inside the session column", () => {
 	assert.match(composerArea, /className="composer[^\"]*min-h-0[^\"]*overflow-hidden/);
-	// 输入卡 shrink-0：面板剩余高度不撑开输入框（todo/终端拖拽与输入高度解耦）
-	assert.match(composerArea, /composer-box relative flex[^"]*shrink-0/);
+	// 输入卡可收缩（min-h-0，不写 shrink-0/flex-1）：终端展开后列被 max-height 卡住时，
+	// 输入卡要跟着变矮并把滚动交给编辑器；写死 shrink-0 会把底栏挤出容器被终端盖住。
+	assert.match(composerArea, /composer-box relative flex min-h-0[^"]*flex-col/);
+	assert.doesNotMatch(composerArea, /composer-box relative flex[^"]*shrink-0/);
 	assert.doesNotMatch(composerArea, /runtimeUi/);
 	assert.doesNotMatch(composerArea, /AskRegionResizer/);
 });

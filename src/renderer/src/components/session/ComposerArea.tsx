@@ -59,7 +59,8 @@ type ComposerExtrasProps = {
 };
 
 /**
- * 输入栏固有高度：独立卡按内容撑开，列被 max-height 卡住时才内部滚动。
+ * 输入栏固有高度：独立卡按内容撑开；父列被 max-height 卡住时整体收缩，
+ * 编辑器拿到变矮后的高度并内部滚动（底栏固定行不被寄出可视区）。
  * 折叠状态放在这里，是为了一次重渲染就让 footer 跟着内容变高/变矮。
  */
 function ComposerMeasuredExtras(props: ComposerExtrasProps) {
@@ -76,7 +77,7 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 					{props.deliveryNotice}
 				</div>
 				{hasAttachmentBar ? <div className="shrink-0">{props.attachmentBar}</div> : null}
-				<div className="flex w-full min-w-0 shrink-0 flex-col">
+				<div className="flex min-h-0 min-w-0 flex-col">
 					{props.composerBox}
 					{props.statsLine}
 				</div>
@@ -116,8 +117,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		<ComposerRuntimeIntegrations sessionId={props.sessionId}>
 			{({ feishuIndicator }) => (
 				<>
-					{/* 固有高度：内容撑开 footer；父列 max-height 卡住时独立卡内部滚动，
-              输入卡 shrink-0 始终完整可见。 */}
+					{/* 固有高度：内容撑开 footer；父列 max-height 卡住时列内各段一起收缩，
+              编辑器拿到变矮后的高度并内部滚动（底栏固定行不被寄出可视区）。 */}
 					<footer ref={footerRef} className="composer flex max-h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-2" style={composerFooterStyle()} data-session-id={props.sessionId}>
 						<ComposerMeasuredExtras
 							widgets={props.widgets ?? null}
@@ -128,12 +129,14 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									<ComposerAttachmentBar images={composer.attachments} onPreview={composer.images.preview} onRemove={composer.images.remove} onClear={composer.images.clear} pasteFiles={composer.pasteFiles.files} onRemovePasteFile={composer.pasteFiles.remove} onClearPasteFiles={composer.pasteFiles.clear} />
 								) : null
 							}
-							statsLine={<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} />}
+							statsLine={
+								<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} provider={composer.runtime?.state?.provider ?? composer.record?.model?.provider ?? composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider} backend={composer.backend === "dsh" ? "dsh" : "pi"} />
+							}
 							composerBox={
 								<div
 									// overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切
 									className={[
-										"composer-box relative flex w-full min-w-0 shrink-0 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
+										"composer-box relative flex min-h-0 min-w-0 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
 										composer.bangMode === "bang-bang" ? "shell-silent-mode" : composer.bangMode === "bang" ? "shell-mode" : composer.mode === "plan" ? "plan-mode" : composer.mode === "goal" ? "goal-mode" : "",
 									]
 										.filter(Boolean)

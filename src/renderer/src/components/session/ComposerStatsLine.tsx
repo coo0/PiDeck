@@ -3,6 +3,8 @@ import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
 import { formatDuration } from "./TimelineFormat";
 import { formatTokens } from "./SessionContextMeter";
+import { ProviderUsageInline } from "../app/ProviderUsageInline";
+import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
 
 /**
  * 输入卡正下方的会话指标条（dsh-web StatsLine / conversation.composer.dock）。
@@ -77,11 +79,12 @@ export function buildComposerStatsGroups(state: Pick<AgentRuntimeState, "dshSess
 	return groups;
 }
 
-export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?: AgentRuntimeState; turnCount?: number }) {
+export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?: AgentRuntimeState; turnCount?: number; provider?: string; backend?: UsageProbeBackend }) {
 	const groups = buildComposerStatsGroups(props.state, props.turnCount);
 	const rootRef = useRef<HTMLDivElement | null>(null);
 	const [truncated, setTruncated] = useState(false);
 	const line = groups.join(" | ");
+	const hasProviderBalance = Boolean(props.provider?.trim());
 
 	useLayoutEffect(() => {
 		const el = rootRef.current;
@@ -96,9 +99,21 @@ export const ComposerStatsLine = memo(function ComposerStatsLine(props: { state?
 		return () => observer.disconnect();
 	}, [line]);
 
-	if (groups.length === 0) return null;
+	if (groups.length === 0 && !hasProviderBalance) return null;
 	return (
-		<div ref={rootRef} className="w-full min-w-0 truncate px-1 pb-0 pt-1 text-center text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+		<div ref={rootRef} className="flex w-full min-w-0 items-center justify-center truncate px-1 pb-0 pt-1 text-center text-[12px] leading-5 text-text-tertiary" title={truncated ? line : undefined} data-testid="composer-stats-line">
+			{hasProviderBalance && (
+				<>
+					<span className="shrink-0" data-testid="composer-provider-balance">
+						<ProviderUsageInline provider={props.provider!} variant="row" backend={props.backend ?? "pi"} />
+					</span>
+					{groups.length > 0 && (
+						<span className="mx-2.5 text-border-strong" aria-hidden>
+							|
+						</span>
+					)}
+				</>
+			)}
 			{groups.map((group, i) => (
 				<Fragment key={group}>
 					{i > 0 && (

@@ -27,6 +27,17 @@ test("usageProbeUrls 生成版本化与原样两条去重路径", () => {
 	assert.ok(urls.some((u) => u.includes("/v1/usage")));
 });
 
+test("pt /v1/usage 顶层 remaining/unit 响应可解析为余额", () => {
+	const parsed = probe.parseUsageResponseBody({ remaining: 85.42595282, unit: "USD" }, '{"remaining":85.42595282,"unit":"USD"}', {
+		kind: "balance",
+		valuePath: "remaining",
+		currencyPath: "unit",
+	});
+	assert.equal(parsed.matched, true);
+	assert.equal(parsed.balance.value, 85.42595282);
+	assert.equal(parsed.balance.currency, "USD");
+});
+
 test("parseUsageResponseBody 解析 rolling/weekly/monthly 三档百分比", () => {
 	const body = {
 		usage: {

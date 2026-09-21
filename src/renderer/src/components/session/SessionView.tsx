@@ -285,7 +285,7 @@ export function SessionView({
               max-height 相对本列：窗口放大后上限抬起，待办/改文件条随内容恢复，不锁死像素。 */}
 					{bottomComposerVisible && (
 						<div
-							className="session-v-composer flex min-h-0 shrink-0 flex-col overflow-hidden [scrollbar-gutter:stable]"
+							className="session-v-composer flex min-h-0 shrink flex-col overflow-hidden [scrollbar-gutter:stable]"
 							style={{
 								maxHeight: `min(${COMPOSER_MAX_HEIGHT}px, calc(100% - var(--session-timeline-min, ${TIMELINE_MIN_HEIGHT}px)))`,
 							}}

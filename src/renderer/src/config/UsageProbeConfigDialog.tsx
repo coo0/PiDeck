@@ -181,28 +181,27 @@ export function UsageProbeConfigDialog(props: {
 				setTimeoutSecs(config?.timeoutSecs ?? 10);
 				setIntervalMinutes(config?.intervalMinutes ?? 5);
 				setLoadErrors(result.errors);
-				// 旧版 probes 数组命中回显：无声明式模板时预选 Cookie 模板并回填字段，
-				// 让手写/历史配置可见可迁（保存即转为声明式配置）。
+				// 旧版 probes 数组只在没有显式模板时用于迁移提示。标准 Bearer balance
+				// 探针不含 Cookie，不能误填 Cookie 模板；它继续由 legacy probes 自动路由。
 				const legacy = result.legacyProbes ?? [];
 				if (legacy.length > 0 && !config?.template) {
 					const first = legacy[0];
 					const cookieHeader = first.request?.headers?.["Cookie"] ?? first.request?.headers?.cookie ?? "";
-					if (cookieHeader) setCookie(cookieHeader);
-					if (first.request?.path) setCookiePath(first.request.path);
-					// parse 是判别联合：currencyPath 只在 kind "balance" 分支可取。
 					const parse = first.parse;
-					if (parse?.kind === "balance") {
-						if (parse.valuePath) setValuePath(parse.valuePath);
-						if (parse.currencyPath) setCurrencyPath(parse.currencyPath);
+					if (cookieHeader) {
+						setCookie(cookieHeader);
+						if (first.request?.path) setCookiePath(first.request.path);
+						if (parse?.kind === "balance") {
+							if (parse.valuePath) setValuePath(parse.valuePath);
+							if (parse.currencyPath) setCurrencyPath(parse.currencyPath);
+						}
+						setTemplate("cookie");
+					} else if (parse?.kind === "balance" && first.request?.path === "/usage") {
+						// /usage + balance 是通用 Bearer 探针，不是 Cookie 登录态。
+						setTemplate(NONE_TEMPLATE);
 					}
 					const firstNamed = legacy.find((item) => item.name)?.name;
-					setLegacyNotice(
-						t("config.usageProbe.legacyDetected", {
-							count: String(legacy.length),
-							name: firstNamed ?? t("config.usageProbe.legacyUnnamed"),
-						}),
-					);
-					setTemplate("cookie");
+					setLegacyNotice(t("config.usageProbe.legacyDetected", { count: String(legacy.length), name: firstNamed ?? t("config.usageProbe.legacyUnnamed") }));
 				}
 				setLoaded(true);
 			})
@@ -308,8 +307,10 @@ export function UsageProbeConfigDialog(props: {
 			timeoutSecs,
 			intervalMinutes,
 		};
-		// 内置识别命中 / 无模板：不写 template（自动路由）；声明式：写模板 id + 模板字段。
-		if (!isNone && current && (current.id === "general" || current.id === "newapi" || current.id === "cookie")) {
+		// 无模板也要写入显式哨兵，否则保留的旧 probes 会在下次打开时触发迁移回显。
+		if (isNone) {
+			config.template = NONE_TEMPLATE;
+		} else if (current && (current.id === "general" || current.id === "newapi" || current.id === "cookie")) {
 			config.template = current.id;
 			if (current.id === "general") {
 				if (apiKey.trim()) config.apiKey = apiKey.trim();

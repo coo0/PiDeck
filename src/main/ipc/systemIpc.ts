@@ -1956,6 +1956,8 @@ export function registerSystemIpc(deps: SystemIpcDeps): void {
 			backend: input.backend === "dsh" ? "dsh" : "pi",
 			template: template ?? "(auto)",
 			success: result.success,
+			...(result.error ? { error: result.error } : {}),
+			...(result.detail ? { detail: result.detail } : {}),
 		});
 		return result;
 	});

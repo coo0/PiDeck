@@ -40,7 +40,10 @@ test("footer sizes to content and does not hug a measured pixel height", () => {
 	// widget 卡片共用这一层纵向滚动；必须预留原生 thin scrollbar 槽位，
 	// 否则临界溢出时滚动条开关会改变卡片宽度并触发二次布局。
 	assert.match(composerArea, /className="[^"]*overflow-y-auto[^"]*\[scrollbar-gutter:stable\][^"]*"/);
-	assert.match(composerArea, /composer-box relative flex w-full min-w-0 shrink-0 flex-col/);
+	// 输入卡可收缩：终端展开后列被 max-height 卡住时，输入区变矮并把滚动交给编辑器；
+	// 写死 shrink-0 会把底栏（模型/发送钮）挤出列外被终端盖住。
+	assert.match(composerArea, /composer-box relative flex min-h-0[^"]*flex-col/);
+	assert.doesNotMatch(composerArea, /composer-box relative flex[^"]*shrink-0/);
 	assert.doesNotMatch(composerArea, /composer-box relative flex min-h-0 w-full min-w-0 flex-1 flex-col/);
 });
 
@@ -83,6 +86,6 @@ test("column keeps a timeline floor and a compact composer floor", () => {
 	assert.match(rendererUtils, /COMPOSER_MIN_HEIGHT = 112/);
 	assert.match(rendererUtils, /COMPOSER_MAX_HEIGHT = 480/);
 	assert.match(sessionView, /TIMELINE_MIN_HEIGHT \+ COMPOSER_MIN_HEIGHT/);
-	assert.match(composerArea, /composer-box[^"]*shrink-0/);
+	assert.match(composerArea, /composer-box[^"]*min-h-0/);
 	assert.match(composerArea, /className="composer[^\"]*px-0 pb-2"/);
 });

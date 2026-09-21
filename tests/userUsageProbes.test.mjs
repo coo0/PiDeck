@@ -346,9 +346,32 @@ test("按 provider 合并保存：只改目标条目，其它 providers 不动",
 	}
 });
 
+test("显式保存 none 后重读仍保持无模板，并保留旧 probes 自动路由", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "usage-probes-none-"));
+	try {
+		await writeFile(
+			join(dir, "usage-probes.json"),
+			JSON.stringify({
+				probes: [{ match: { baseUrlContains: ["cn.pptoken.cc"] }, request: { path: "/usage" }, parse: { kind: "balance", valuePath: "data.remaining", currencyPath: "data.unit" } }],
+			}),
+			"utf8",
+		);
+		const saved = await saveUsageProbeForProvider(dir, "pt", { enabled: true, template: "none" });
+		assert.equal(saved.ok, true);
+		const loaded = await loadUsageProbeSettings(dir, "pt");
+		assert.equal(loaded.config.template, "none");
+		assert.equal(loaded.legacyProbes, undefined);
+		const file = JSON.parse(await readFile(join(dir, "usage-probes.json"), "utf8"));
+		assert.equal(file.providers.pt.template, "none");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
 test("normalizeProviderConfig：enabled/template/超时/间隔边界校验", () => {
 	assert.equal(json(normalizeProviderConfig({ enabled: false }).config), json({ enabled: false }));
 	assert.equal(json(normalizeProviderConfig({ template: "newapi", timeoutSecs: 30, intervalMinutes: 0 }).config), json({ template: "newapi", timeoutSecs: 30, intervalMinutes: 0 }));
+	assert.equal(normalizeProviderConfig({ template: "none" }).config.template, "none");
 	assert.match(normalizeProviderConfig({ template: "hack" }).error, /未知模板/);
 	assert.match(normalizeProviderConfig({ baseUrl: "ftp://x" }).error, /http/);
 	assert.match(normalizeProviderConfig({ timeoutSecs: 0 }).error, /1-300/);

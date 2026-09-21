@@ -353,7 +353,9 @@ export function normalizeProviderConfig(input: unknown): { config: UsageProbePro
 		if (typeof input.template !== "string") return { error: "template 必须是字符串" };
 		const id = input.template.trim();
 		const isBuiltin = Object.prototype.hasOwnProperty.call(USAGE_PROBE_CATEGORY_BY_TEMPLATE_ID, id);
-		if (!isBuiltin && id !== "general" && id !== "newapi" && id !== "cookie") {
+		// "none" 是 UI 的显式选择：与省略 template 一样走自动探针，但必须落盘，
+		// 否则打开弹窗时会把仍保留的旧 probes 误判成待迁移 Cookie 模板。
+		if (!isBuiltin && id !== "general" && id !== "newapi" && id !== "cookie" && id !== "none") {
 			return { error: `未知模板：${id}` };
 		}
 		config.template = id;

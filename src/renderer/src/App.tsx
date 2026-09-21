@@ -9,9 +9,9 @@ import {
 	Code,
 	Activity,
 	FolderOpen,
+	NotebookPen,
 	Globe,
 	History,
-	Pencil,
 	Terminal,
 	GitBranch,
 	// 命令面板（Ctrl/Cmd+P）操作项图标
@@ -3528,15 +3528,17 @@ export function App() {
 				: [];
 
 	// 工具开关上收会话 Tab 栏（原右侧悬浮工具条入口的唯一挂载点）：
-	// 草稿纸 / 终端 / 外部编辑器，与抽屉开关同排。
+	// 草稿纸 / 终端 常驻在「更多操作」左侧（高频开关，一眼可见）；
+	// 「打开方式」需要鼠标坐标定位弹层，保留在「更多操作」菜单里。
 	// 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
 	// web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端。
 	const sessionToolActions: SessionToolAction[] = [
 		{
 			id: "scratch",
 			label: t("scratchPad.openTooltip"),
-			icon: <Pencil size={14} />,
+			icon: <NotebookPen size={14} />,
 			active: scratchPad.isOpen,
+			inline: true,
 			onClick: () => scratchPad.toggle(),
 		},
 		...(!isLanWeb && terminalTarget
@@ -3546,6 +3548,7 @@ export function App() {
 						label: t("app.terminal"),
 						icon: <Terminal size={14} />,
 						active: terminalOpen,
+						inline: true,
 						onClick: () => {
 							setTerminalOpenForOwner(!terminalOpen);
 						},

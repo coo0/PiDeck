@@ -668,6 +668,8 @@ export const ipcChannels = {
 	terminalData: "terminal:data",
 	terminalExit: "terminal:exit",
 	terminalShells: "terminal:shells",
+	/** 系统已安装字体族（终端设置页字体下拉的数据源） */
+	terminalFonts: "terminal:fonts",
 
 	// ===== 飞书桥接 =====
 	feishuConnect: "feishu:connect",

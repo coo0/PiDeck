@@ -234,6 +234,32 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 		keywords: ["原生菜单", "菜单栏", "native menu", "窗口菜单"],
 	},
 
+	// ── 终端 ──────────────────────────────────────────────────────────
+	{
+		tab: "terminal",
+		slug: "terminal-padding-y",
+		labelKey: "settings.terminal.paddingY",
+		keywords: ["终端内边距", "内边距", "间距", "padding", "terminal padding"],
+	},
+	{
+		tab: "terminal",
+		slug: "terminal-font-size",
+		labelKey: "settings.terminal.fontSize",
+		keywords: ["终端字号", "终端字体大小", "terminal font size", "字号"],
+	},
+	{
+		tab: "terminal",
+		slug: "terminal-font-family",
+		labelKey: "settings.terminal.fontFamily",
+		keywords: ["终端字体", "等宽字体", "terminal font", "font family", "字体"],
+	},
+	{
+		tab: "terminal",
+		slug: "terminal-scrollback",
+		labelKey: "settings.terminal.scrollback",
+		keywords: ["滚动回放", "回滚行数", "滚动缓冲", "scrollback", "历史行数"],
+	},
+
 	// ── Git ──────────────────────────────────────────────────────────
 	{
 		tab: "git",

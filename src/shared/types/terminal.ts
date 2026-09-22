@@ -19,6 +19,8 @@ export type TerminalTab = {
 	exited?: boolean;
 	exitCode?: number;
 	buffer?: string;
+	/** 前台进程名（node-pty IPty.process）；用于「有关闭中进程才确认」的判定 */
+	frontProcess?: string;
 };
 
 /**

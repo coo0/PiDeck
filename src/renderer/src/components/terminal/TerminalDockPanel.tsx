@@ -3,6 +3,8 @@ import { ResizableHandle, ResizablePanel } from "../ui-shadcn/resizable";
 import { SessionRuntimeDock } from "../session/SessionRuntimeDock";
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalTarget } from "../../../../shared/types";
+import type { TerminalThemeId } from "../../../../shared/types/settings";
+import type { TerminalDockSettings } from "./TerminalDock";
 import { TERMINAL_HEIGHT_MIN, applyTerminalPanelResize } from "../../terminalDockState";
 
 /** 终端分屏面板的固定约束（px），会话视图与引导页两条路径共用同一组值 */
@@ -20,6 +22,10 @@ export type TerminalDockPanelProps = {
 	/** 可用高度上限（px）：maxSize clamp，防止终端吃掉整个工作区 */
 	maxHeight: number;
 	terminal: PiDesktopApi["terminal"];
+	/** 终端外观设置（AppSettings 子集；设置变更即生效） */
+	terminalSettings: TerminalDockSettings;
+	/** 终端更多菜单切换主题：写回设置 */
+	onThemeChange: (themeId: TerminalThemeId) => void;
 	/** 终端归属键（agent:<id> / project:<id>）：切换 owner 时重建 dock 实例 */
 	ownerKey?: string;
 	/** 可选：调用方需要命令式 collapse()/expand() 时传入（SessionView 折叠联动） */
@@ -107,6 +113,8 @@ export function TerminalDockPanel(props: TerminalDockPanelProps) {
 					collapsed={props.collapsed}
 					height={props.height}
 					terminal={props.terminal}
+					terminalSettings={props.terminalSettings}
+					onThemeChange={props.onThemeChange}
 					onOpenChange={props.onOpenChange}
 					onCollapsedChange={props.onCollapsedChange}
 					onHeightChange={() => {

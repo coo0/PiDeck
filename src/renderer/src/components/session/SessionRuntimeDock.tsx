@@ -1,6 +1,7 @@
 import type { PiDesktopApi } from "../../../../preload";
 import type { TerminalTarget } from "../../../../shared/types";
-import { TerminalDock } from "../terminal/TerminalDock";
+import type { TerminalThemeId } from "../../../../shared/types/settings";
+import { TerminalDock, type TerminalDockSettings } from "../terminal/TerminalDock";
 
 export const SESSION_RUNTIME_DOCK_MOTION_MS = 180;
 
@@ -40,6 +41,10 @@ export type SessionRuntimeDockProps = {
 	collapsed: boolean;
 	height: number;
 	terminal: PiDesktopApi["terminal"];
+	/** 终端外观设置（AppSettings 子集；设置变更即生效） */
+	terminalSettings: TerminalDockSettings;
+	/** 终端更多菜单切换主题：写回设置 */
+	onThemeChange: (themeId: TerminalThemeId) => void;
 	onOpenChange: (open: boolean) => void;
 	onCollapsedChange: (collapsed: boolean) => void;
 	onHeightChange: (height: number) => void;
@@ -50,5 +55,19 @@ export type SessionRuntimeDockProps = {
 // key 由父级按 owner 传入（agent:<id> / project:<id>），切换 owner 时整体重建实例。
 export function SessionRuntimeDock(props: SessionRuntimeDockProps) {
 	if (!props.mounted || !props.target) return null;
-	return <TerminalDock target={props.target} open={props.open} closing={props.closing} collapsed={props.collapsed} height={props.height} terminal={props.terminal} onCollapsedChange={props.onCollapsedChange} onHeightChange={props.onHeightChange} onClose={() => props.onOpenChange(false)} />;
+	return (
+		<TerminalDock
+			target={props.target}
+			open={props.open}
+			closing={props.closing}
+			collapsed={props.collapsed}
+			height={props.height}
+			terminal={props.terminal}
+			terminalSettings={props.terminalSettings}
+			onThemeChange={props.onThemeChange}
+			onCollapsedChange={props.onCollapsedChange}
+			onHeightChange={props.onHeightChange}
+			onClose={() => props.onOpenChange(false)}
+		/>
+	);
 }

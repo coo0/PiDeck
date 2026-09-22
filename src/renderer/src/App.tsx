@@ -129,6 +129,8 @@ import { useSessionWorkspaceChrome } from "./hooks/useSessionWorkspaceChrome";
 import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
 import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
 import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
+import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
+import type { TerminalThemeId } from "../../shared/types/settings";
 import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
 import { AppShell } from "./components/app/AppShell";
 import { WorkspaceDrawerRail } from "./components/workspace/WorkspaceDrawerRail";
@@ -704,6 +706,17 @@ export function App() {
 		fontFamilyBaseCustom: "",
 		fontFamilyMono: "system-mono",
 		fontFamilyMonoCustom: "",
+		// 终端设置：与主进程 defaultSettings 保持一致，避免启动时闪烁
+		terminalTheme: "inherit",
+		terminalFontSize: null,
+		terminalFontFamily: "",
+		terminalScrollback: 5000,
+		terminalCursorStyle: "block",
+		terminalCursorBlink: true,
+		terminalCopyOnSelect: false,
+		terminalPaddingY: 8,
+		terminalConfirmClose: "running",
+		terminalStartupCommand: "",
 		removedBuiltInExtensions: [],
 		// 声音提醒：与主进程 defaultSettings 保持一致（完成/异常开、等待输入关）
 		soundAlert: createDefaultSoundAlertSettings(),
@@ -3342,6 +3355,31 @@ export function App() {
 		[setBranchByProject],
 	);
 
+	// 终端外观设置：App 只做字段映射（不新增业务逻辑），TerminalDock 的热更新 effect 消费。
+	// useMemo 稳定引用：每帧新对象会反复触发热更新（refit + options 重设）。
+	const terminalSettings = useMemo<TerminalDockSettings>(
+		() => ({
+			themeId: settings.terminalTheme,
+			fontSize: settings.terminalFontSize,
+			fontFamily: settings.terminalFontFamily,
+			scrollback: settings.terminalScrollback,
+			cursorStyle: settings.terminalCursorStyle,
+			cursorBlink: settings.terminalCursorBlink,
+			copyOnSelect: settings.terminalCopyOnSelect,
+			paddingY: settings.terminalPaddingY,
+			confirmClose: settings.terminalConfirmClose,
+			startupCommand: settings.terminalStartupCommand,
+		}),
+		[settings.terminalTheme, settings.terminalFontSize, settings.terminalFontFamily, settings.terminalScrollback, settings.terminalCursorStyle, settings.terminalCursorBlink, settings.terminalCopyOnSelect, settings.terminalPaddingY, settings.terminalConfirmClose, settings.terminalStartupCommand],
+	);
+	// 终端 dock 内的主题菜单写回设置（配色的单一数据源在 AppSettings）；静默保存，失败不打断终端使用
+	const setTerminalTheme = useCallback((themeId: TerminalThemeId) => {
+		void api.settings
+			.update({ terminalTheme: themeId })
+			.then(setSettings)
+			.catch(() => undefined);
+	}, []);
+
 	const sessionPaneServices = useMemo(
 		() => ({
 			isLanWeb,
@@ -3379,6 +3417,8 @@ export function App() {
 			validCommandNames,
 			validFilePaths,
 			terminalStatesByOwner,
+			terminalSettings,
+			setTerminalTheme,
 			activeTerminalOwnerKey,
 			availableTerminalHeight: availableTerminalHeight ?? 120,
 			setTerminalOpenByOwnerKey,
@@ -3431,6 +3471,8 @@ export function App() {
 			setTerminalOpenByOwnerKey,
 			showToast,
 			terminalStatesByOwner,
+			setTerminalTheme,
+			terminalSettings,
 			availableTerminalHeight,
 			validCommandNames,
 			validFilePaths,
@@ -3478,6 +3520,8 @@ export function App() {
 							height={terminalRowHeight}
 							maxHeight={availableTerminalHeight ?? 120}
 							terminal={api.terminal}
+							terminalSettings={terminalSettings}
+							onThemeChange={setTerminalTheme}
 							ownerKey={terminalOwner ? terminalOwnerKey(terminalOwner) : undefined}
 							onOpenChange={setTerminalOpenForOwner}
 							onCollapsedChange={setTerminalCollapsedForOwner}

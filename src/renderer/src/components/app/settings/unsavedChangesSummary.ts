@@ -6,7 +6,7 @@ import { t, type TranslationKey } from "../../../i18n";
  * 用户可能先改外观再改语言，但「常用设置」里的项更容易对上导航。
  */
 
-export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen";
+export type SettingsUnsavedTabId = "common" | "shortcuts" | "appearance" | "terminal" | "proxy" | "web" | "editors" | "git" | "dev" | "im" | "pet" | "notification" | "storage" | "usage" | "process" | "vision" | "imagegen";
 
 /** 单条变更项：tab 名 + 字段名（均为 i18n key，渲染时再翻译）。 */
 export type SettingsUnsavedItem = {
@@ -31,6 +31,7 @@ const TAB_LABEL_KEYS: Record<SettingsUnsavedTabId, TranslationKey> = {
 	common: "settings.tabs.common",
 	shortcuts: "settings.tabs.shortcuts",
 	appearance: "settings.tabs.appearance",
+	terminal: "settings.tabs.terminal",
 	proxy: "settings.tabs.proxy",
 	web: "settings.tabs.web",
 	editors: "settings.tabs.editors",
@@ -93,6 +94,17 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "contentMaxWidth", tab: "appearance", itemKey: "settings.contentWidthPct" },
 	{ field: "useNativeTitleBar", tab: "appearance", itemKey: "settings.nativeTitleBar" },
 	{ field: "showNativeMenu", tab: "appearance", itemKey: "settings.nativeMenu" },
+
+	{ field: "terminalTheme", tab: "terminal", itemKey: "settings.terminal.theme" },
+	{ field: "terminalPaddingY", tab: "terminal", itemKey: "settings.terminal.paddingY" },
+	{ field: "terminalFontSize", tab: "terminal", itemKey: "settings.terminal.fontSize" },
+	{ field: "terminalFontFamily", tab: "terminal", itemKey: "settings.terminal.fontFamily" },
+	{ field: "terminalScrollback", tab: "terminal", itemKey: "settings.terminal.scrollback" },
+	{ field: "terminalCursorStyle", tab: "terminal", itemKey: "settings.terminal.cursorStyle" },
+	{ field: "terminalCursorBlink", tab: "terminal", itemKey: "settings.terminal.cursorBlink" },
+	{ field: "terminalCopyOnSelect", tab: "terminal", itemKey: "settings.terminal.copyOnSelect" },
+	{ field: "terminalConfirmClose", tab: "terminal", itemKey: "settings.terminal.confirmClose" },
+	{ field: "terminalStartupCommand", tab: "terminal", itemKey: "settings.terminal.startupCommand" },
 
 	{ field: "piProxyEnabled", tab: "proxy", itemKey: "settings.enablePiProxy" },
 	{ field: "piProxyUrl", tab: "proxy", itemKey: "settings.proxyUrl" },

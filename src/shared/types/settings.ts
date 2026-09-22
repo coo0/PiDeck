@@ -57,6 +57,12 @@ export type AppFontBaseMode = "system" | "sans" | "serif" | "custom";
 export type AppFontMonoMode = "system-mono" | "custom";
 /** 主窗口启动尺寸预设：last=上次关闭时的窗口大小（读不到时顺延默认）；fullscreen 占满屏幕，maximized 最大化，其余为固定窗口 */
 export type StartupWindowMode = "last" | "fullscreen" | "maximized" | "normal-large" | "normal-medium" | "normal-compact";
+/** 终端配色主题 id；"inherit" 表示跟随应用明暗（现有 pi-soft 行为）。 */
+export type TerminalThemeId = "inherit" | "solarized-light" | "solarized-dark" | "one-dark" | "monokai";
+/** 关闭终端标签时的确认策略：never 从不问；running 有前台进程才问；always 总是问。 */
+export type TerminalConfirmCloseMode = "never" | "running" | "always";
+/** 终端光标形状 */
+export type TerminalCursorStyle = "block" | "bar" | "underline";
 
 /**
  * 一条扩展禁用记录：作用域区分 user/project 同名 source 的独立状态。
@@ -362,6 +368,28 @@ export type AppSettings = {
 	fontFamilyMono: AppFontMonoMode;
 	/** fontFamilyMono=custom 时的自定义字体族栈，原样写入 CSS font-family */
 	fontFamilyMonoCustom: string;
+
+	// ── 终端（外观/行为/启动）──
+	/** 终端配色主题 id。inherit=跟随应用明暗（深色用 pi-soft 暗版） */
+	terminalTheme: TerminalThemeId;
+	/** 终端字号（px）。为 null 时跟随外观设置的 UI 字号档位 */
+	terminalFontSize: number | null;
+	/** 终端字体族自定义栈。空串时使用 --font-family-mono（外观设置的代码字体） */
+	terminalFontFamily: string;
+	/** 终端滚动回放行数上限（下次新开终端生效） */
+	terminalScrollback: number;
+	/** 光标形状 */
+	terminalCursorStyle: TerminalCursorStyle;
+	/** 光标是否闪烁 */
+	terminalCursorBlink: boolean;
+	/** 选区变化时是否自动复制到系统剪贴板 */
+	terminalCopyOnSelect: boolean;
+	/** 终端内容区上下内边距（px） */
+	terminalPaddingY: number;
+	/** 关闭终端标签时的确认策略 */
+	terminalConfirmClose: TerminalConfirmCloseMode;
+	/** 可选的终端启动命令：非空时新终端在 shell 启动后立即执行该命令 */
+	terminalStartupCommand: string;
 
 	// ── 更新检测 ──
 	/**

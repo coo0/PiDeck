@@ -307,24 +307,29 @@ overflow-y: auto; min-height: 0; padding-bottom: 4px;
 
 ### 1.5 定位与宽度计算（关键实现细节）
 
+> **实现修正（已实测）**：浮层必须 **portal 到 document.body + `position: fixed`**。
+> 不能按原稿的 `absolute` 挂在 chip 宿主里——底栏祖先链上有两层 `overflow-hidden`
+> （`ComposerArea` 的 `footer`、`ComposerComponents` 的 `composer-bottom-center`），
+> 会把 `absolute` 浮层整个裁掉。**症状是「点 chip 完全没反应」：DOM 里存在、
+> `visibility: visible`、定位正确，但屏幕上看不见。**
+> 旧实现用 Radix `PopoverContent`（自带 portal）所以没这个问题；本改动自绘容器时
+> 必须自己 portal。定位因此改用 `getBoundingClientRect` 相对 **viewport** 计算，
+> 与既有 `SessionContextMeter` 面板同一策略（见其 positionPanel）。
+
 ```
-① 挂载：浮层挂到 chip 的定位宿主（`position: relative` 的 wrapper），
-        而不是整个应用容器 —— 否则 left:0 会让浮层跑到应用最左边。
+① 挂载：portal 到 document.body + position: fixed（见上方修正）。
+        定位相对 viewport，不再相对 chip 宿主。
 
 ② 宽度：
-   - 一级：先置 width:max-content 让 CSS 的 min/max-width 钳制生效，
-           读 offsetWidth 得到最终值，再写成 `${w}px` 以驱动过渡。
+   - 一级：量一个 w-max 的内容盒（自身宽度不受浮层 width 过渡影响，
+           量到的值稳定），再写成 `${w}px` 以驱动过渡。
    - 二级：直接用 452。
 
-③ 位置：按 chip 水平居中，再在边界内钳制（左右各留 8px）：
-   centered = hostRect.width / 2 - w / 2
-   min      = 8 - hostRect.left                        ← 以**视口**为界
-   max      = innerWidth - 8 - w - hostRect.left
-   left     = clamp(centered, min, max)
-
-   > 实现取**视口**为界而不是「应用容器」：视口钳制是严格更安全的约束
-   > （浮层永不越出屏幕），且 composer 本就横跨窗口，两者结果一致；
-   > 这样也无需为取应用根节点再穿一层 ref。
+③ 位置：按 chip 水平居中，再在**视口**内钳制（左右各留 8px）：
+   centered = anchorRect.left + anchorRect.width / 2 - w / 2
+   left     = clamp(centered, 8, innerWidth - 8 - w)
+   垂直：优先 bottom = innerHeight - anchorRect.top + 9（浮层贴 chip 上方）；
+         上方放不下时翻转 top = anchorRect.bottom + 9。
 
 ④ 重量宽度只在模型变化时触发：
    用 lastMeasuredKey 守卫（记录上次量宽时的模型 key）。

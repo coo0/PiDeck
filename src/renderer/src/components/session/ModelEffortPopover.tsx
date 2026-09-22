@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import type { AvailableModel } from "../../../../shared/types";
 import { t, type TranslationKey } from "../../i18n";
@@ -20,6 +21,11 @@ import { isPopoverOpen, type EffortPopoverView } from "../../utils/modelEffortPo
  *   顶部空间不足时翻转到下方；
  * - 选中模型后**退回一级**（不是关闭）：用户选完模型通常接着调档位；
  * - Esc 逐级返回，外点一律关闭（转移表见 utils/modelEffortPopover，已单测）。
+ *
+ * 必须 **portal 到 body** 并用 fixed 定位（与 SessionContextMeter 面板同一策略）：
+ * 底栏祖先链上有两层 `overflow-hidden`（ComposerArea 的 footer、ComposerComponents 的
+ * composer-bottom-center），absolute 挂 chip 同级会被直接裁掉——表现为「点 chip 完全没反应」。
+ * portal 后浮层不再受任何祖先裁剪，定位改用 getBoundingClientRect 相对 viewport 计算。
  *
  * 两个已实测复现的坑（必须保留处理，删掉就会复发）：
  * 1. **档位名固定宽度**（pill 的档位名 min-width: 46px）：档位名长度不一
@@ -182,8 +188,8 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 	const popoverRef = useRef<HTMLDivElement | null>(null);
 	const contentRef = useRef<HTMLDivElement | null>(null);
 	const [width, setWidth] = useState(EFFORT_MIN_WIDTH);
-	const [left, setLeft] = useState(0);
-	const [flipDown, setFlipDown] = useState(false);
+	/** 相对 **viewport** 的定位（fixed）：portal 后不再相对 chip 宿主计算。 */
+	const [placement, setPlacement] = useState<{ left: number; top?: number; bottom?: number } | null>(null);
 	const open = isPopoverOpen(props.view);
 	const isModelsView = props.view === "models";
 	// 宽度只跟模型走：档位变化不改浮层宽度（pill 档位名已固定 46px）。
@@ -205,10 +211,11 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 	const displayEffortText = effortLabel(displayLevel) || displayEffort;
 
 	/**
-	 * 定位与宽度：按 chip 居中，再在应用边界内钳制。
+	 * 定位与宽度：按 chip 水平居中，再在视口内钳制；向上弹出，上方放不下时翻转到下方。
 	 *
-	 * 一级宽度量自内容盒（w-max，自身宽度不受浮层 width 过渡影响），因此量到的
-	 * 是稳定值；再写回 px 驱动过渡（不写具体 px 则 CSS 无法在两级间做动画）。
+	 * fixed 定位（相对 viewport）而不是 absolute：浮层已 portal 到 body，相对 chip 宿主
+	 * 算 left 会错位。一级宽度量自内容盒（w-max，自身宽度不受浮层 width 过渡影响），
+	 * 因此量到的是稳定值；再写回 px 驱动过渡（不写具体 px 则 CSS 无法在两级间做动画）。
 	 */
 	const place = useCallback(() => {
 		const popover = popoverRef.current;
@@ -222,18 +229,16 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 			const measured = content ? Math.max(content.offsetWidth, EFFORT_CONTENT_MIN_WIDTH + 32) : EFFORT_MIN_WIDTH;
 			nextWidth = Math.min(EFFORT_MAX_WIDTH, Math.max(EFFORT_MIN_WIDTH, measured));
 		}
-		// 边界：以视口为界钳制（左右各留 EDGE_GAP）。
-		// 不用「应用容器」而用视口：视口钳制是严格更安全的约束（浮层永不越出屏幕），
-		// 且无需为取应用根节点再穿一层 ref（composer 横跨窗口，两者结果一致）。
-		const centered = anchorRect.width / 2 - nextWidth / 2;
-		const min = EDGE_GAP - anchorRect.left;
-		const max = window.innerWidth - EDGE_GAP - nextWidth - anchorRect.left;
-		// 先钳到 [min, max]，再与 centered 取交集——窗口比浮层还窄（min > max）时
-		// 保证不越出左侧，而不是算出越界值。
-		setLeft(Math.round(Math.max(min, Math.min(max, centered))));
+		// 水平：以 chip 中心对齐，并在视口内留 EDGE_GAP。
+		const centered = anchorRect.left + anchorRect.width / 2 - nextWidth / 2;
+		const maxLeft = window.innerWidth - EDGE_GAP - nextWidth;
+		const left = Math.round(Math.max(EDGE_GAP, Math.min(maxLeft, centered)));
+		// 垂直：优先向上（bottom 贴 chip 顶）；上方放不下则翻到 chip 下方（top 贴 chip 底）。
+		const height = popover.offsetHeight || 0;
+		const spaceAbove = anchorRect.top - ANCHOR_GAP - EDGE_GAP;
+		const placementNext = spaceAbove >= height ? { left, bottom: Math.round(window.innerHeight - anchorRect.top + ANCHOR_GAP) } : { left, top: Math.round(anchorRect.bottom + ANCHOR_GAP) };
 		setWidth(nextWidth);
-		// 翻转：上方空间不足时改到 chip 下方（与 SessionContextMeter 面板同策略）。
-		setFlipDown(anchorRect.top - ANCHOR_GAP - (popover.offsetHeight || 0) < EDGE_GAP);
+		setPlacement(placementNext);
 	}, [isModelsView, props.anchorRef]);
 
 	// 打开 / 切视图 / 换模型后重新定位与量宽。effect 依赖里的 modelKey 就是
@@ -243,7 +248,8 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 		place();
 	}, [open, props.view, modelKey, place]);
 
-	// 窗口尺寸变化（含分屏拖拽）后重新定位；不关闭浮层。
+	// 滚动/尺寸变化后重新锚定：fixed 定位不随滚动移动，而 chip 相对 viewport 会变。
+	// 与 SessionContextMeter 面板同策略：重新贴回 chip 而不是关闭。
 	useEffect(() => {
 		if (!open) return;
 		let raf = 0;
@@ -252,9 +258,11 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 			raf = requestAnimationFrame(place);
 		};
 		window.addEventListener("resize", reanchor);
+		window.addEventListener("scroll", reanchor, true);
 		return () => {
 			cancelAnimationFrame(raf);
 			window.removeEventListener("resize", reanchor);
+			window.removeEventListener("scroll", reanchor, true);
 		};
 	}, [open, place]);
 
@@ -285,16 +293,20 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 
 	if (!open) return null;
 
-	return (
+	// portal 到 body：底栏祖先链的两层 overflow-hidden 会裁掉非 portal 的浮层
+	// （见文件头注释）。首帧 placement 为 null → visibility hidden 避免闪一下错位。
+	return createPortal(
 		<div
 			ref={popoverRef}
 			data-view={props.view}
 			data-testid="model-effort-popover"
-			className="absolute z-60 overflow-hidden rounded-xl border border-border-default bg-popover text-foreground shadow-[var(--shadow-popover)] transition-[width,left] duration-[220ms] ease-out-quint"
+			className="fixed z-(--z-popover) overflow-hidden rounded-xl border border-border-default bg-popover text-foreground shadow-[var(--shadow-popover)] transition-[width,left] duration-[220ms] ease-out-quint"
 			style={{
 				width: `${width}px`,
-				left: `${left}px`,
-				...(flipDown ? { top: `calc(100% + ${ANCHOR_GAP}px)` } : { bottom: `calc(100% + ${ANCHOR_GAP}px)` }),
+				left: placement?.left,
+				top: placement?.top,
+				bottom: placement?.bottom,
+				visibility: placement === null ? "hidden" : "visible",
 			}}
 		>
 			{/* 隐形桥接：鼠标从 chip 移到浮层途中不闪断 */}
@@ -322,6 +334,7 @@ export function ModelEffortPopover(props: ModelEffortPopoverProps) {
 			) : (
 				<EffortView contentRef={contentRef} modelLabel={props.modelLabel} modelPendingTo={props.modelPendingTo} effort={displayEffort} effortText={displayEffortText} levels={levelValues} disabled={props.effortDisabled} onToModels={() => props.onViewEvent({ kind: "toModels" })} onPickEffort={props.onPickEffort} />
 			)}
-		</div>
+		</div>,
+		document.body,
 	);
 }

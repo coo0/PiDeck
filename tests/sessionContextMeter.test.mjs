@@ -358,8 +358,9 @@ test("composer chip popover: two levels share one container, effort colors the p
 	// ★ 宽度只在模型变化时重算：effect 依赖里是 modelKey 而不是 currentEffort
 	assert.match(popover, /\[open, props\.view, modelKey, place\]/);
 	// 定位：按 chip 居中并在视口边界内钳制；上方空间不足时翻转
-	assert.match(popover, /const min = EDGE_GAP - anchorRect\.left/);
-	assert.match(popover, /setFlipDown\(anchorRect\.top - ANCHOR_GAP/);
+	// （portal + fixed 后 left 直接相对 viewport，见下方 portal 回归测试）
+	assert.match(popover, /const left = Math\.round\(Math\.max\(EDGE_GAP, Math\.min\(maxLeft, centered\)\)\)/);
+	assert.match(popover, /spaceAbove >= height \? \{ left, bottom:/);
 	// 滑块固定蓝色：档位色只作用于 pill 文字（effortColorVar）
 	assert.match(slider, /var\(--color-info\)/);
 	assert.doesNotMatch(slider, /effortColorVar/);
@@ -580,4 +581,43 @@ test("effort popover resolves the displayed level when the current one is unsupp
 	// 前端再发会与它竞争（DSH selectModelWithCatalogEffort 明确不沿用旧档位）。
 	// 断言写成「不得出现调用」的形式，避免命中上面注释里的说明文字。
 	assert.doesNotMatch(popover, /await\s+applyThinking|desktopApi\.sessions\.setRuntimeThinking/);
+});
+
+/**
+ * 2026-09 回归：浮层被底栏祖先的 overflow-hidden 裁掉。
+ *
+ * 症状极具误导性：点 chip **完全没反应**——DOM 里节点存在、visibility: visible、
+ * 定位数值正确，但屏幕上看不见（ComposerArea 的 footer 与 composer-bottom-center
+ * 都是 overflow-hidden，absolute 浮层会被裁掉）。
+ * 旧实现用 Radix PopoverContent（自带 portal）所以没这个问题；自绘容器必须自己 portal。
+ * 已实测：改为 createPortal + fixed 后浮层出现在 chip 正上方 9px。
+ */
+test("chip 浮层必须 portal 到 body（底栏 overflow-hidden 会裁掉 absolute 浮层）", () => {
+	const popover = readFileSync("src/renderer/src/components/session/ModelEffortPopover.tsx", "utf8");
+	// 必须 portal 到 body
+	assert.match(popover, /import \{ createPortal \} from "react-dom"/);
+	assert.match(popover, /return createPortal\(/);
+	assert.match(popover, /document\.body,\s*\);/);
+	// 必须是 fixed（相对 viewport）而不是 absolute（相对 chip 宿主）
+	assert.match(popover, /className="fixed z-\(--z-popover\)/);
+	assert.doesNotMatch(popover, /className="absolute z-/);
+	// 祖先链上的 overflow-hidden 是根因，断言它确实存在（若哪天被移除，本测试的前提需重评）
+	const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
+	const area = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
+	assert.match(components, /composer-bottom-center flex min-w-0 flex-1 items-center justify-center gap-4\$\{isImageGenMode \? " overflow-x-auto overflow-y-hidden \[scrollbar-width:none\]" : " overflow-hidden"\}/);
+	assert.match(area, /<footer ref=\{footerRef\} className="composer flex max-h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden/);
+});
+
+test("chip 浮层定位相对 viewport（portal 后不能再相对 chip 宿主算 left）", () => {
+	const popover = readFileSync("src/renderer/src/components/session/ModelEffortPopover.tsx", "utf8");
+	// left 直接由 anchor 相对 viewport 的中心算出，不再减去宿主 left
+	assert.match(popover, /const centered = anchorRect\.left \+ anchorRect\.width \/ 2 - nextWidth \/ 2/);
+	// 垂直：优先贴 chip 上方（bottom），放不下才翻转（top）
+	assert.match(popover, /const spaceAbove = anchorRect\.top - ANCHOR_GAP - EDGE_GAP/);
+	assert.match(popover, /spaceAbove >= height \? \{ left, bottom: Math\.round\(window\.innerHeight - anchorRect\.top \+ ANCHOR_GAP\) \} : \{ left, top: Math\.round\(anchorRect\.bottom \+ ANCHOR_GAP\) \}/);
+	// 首帧未定位时隐藏，避免闪一下错位
+	assert.match(popover, /visibility: placement === null \? "hidden" : "visible"/);
+	// 滚动/resize 后重新锚定（fixed 不随滚动移动）
+	assert.match(popover, /addEventListener\("scroll", reanchor, true\)/);
+	assert.match(popover, /addEventListener\("resize", reanchor\)/);
 });

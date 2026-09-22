@@ -12,6 +12,14 @@ import { ChangelogDialog } from "./settings/ChangelogDialog";
 /** 官网主页：品牌常量入口，与 launchRoutes 保持一致，强制系统浏览器打开。 */
 const WEBSITE_URL = "https://ayuayue.github.io/PiDeck/";
 
+/**
+ * 源码仓库主页（本 fork 自己的仓库）。
+ * 刻意不复用 appInfo.releasesUrl：后者来自主进程的更新链路常量（releaseRepo.ts），
+ * 与 electron-updater 的 GitHub provider 同源；把它改成 fork 坐标会让更新检查指向一个
+ * 没有 Release 的仓库。展示链接与更新链路因此分开，各管各的。
+ */
+const GITHUB_REPO_URL = "https://github.com/coo0/PiDeck";
+
 interface AboutPopoverProps {
 	/** 应用/pi/DSH/pi-ai 版本与时间信息，由 App 从主进程 AppInfo IPC 拉取后传入。 */
 	appInfo: AppInfo;
@@ -35,8 +43,8 @@ export function AboutPopover(props: AboutPopoverProps) {
 	// 面板残留在遮罩下既挡视线又会被误认为还在交互，应随弹窗打开一并收起。
 	const [aboutOpen, setAboutOpen] = useState(false);
 
-	// releasesUrl 形如 https://github.com/ayuayue/PiDeck/releases，去掉 /releases 即仓库主页
-	const githubUrl = props.appInfo.releasesUrl.replace(/\/releases\/?$/, "") || WEBSITE_URL;
+	// 源码仓库链接用本 fork 的常量；Releases 行仍用 appInfo.releasesUrl（更新链路同源）
+	const githubUrl = GITHUB_REPO_URL;
 	const info = props.appInfo;
 
 	return (

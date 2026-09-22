@@ -16,6 +16,14 @@
 #
 # 安装：node scripts/install-git-hooks.mjs（npm install 会经 prepare 自动执行；幂等）。
 
+# ── 本 fork 的本地覆盖（与上游唯一的差异，合并上游时需保留）─────────────────
+# 上游把 pre-push 用作「把推送镜像到作者自己 AtomGit 仓库」的通道：
+# scripts/atomgit-mirror.mjs 的 DEFAULT_ATOMGIT_URL 指向 atomgit.com/ayuayue/PiDeck。
+# 本 fork 不向任何上游仓库写入，因此在此固定跳过镜像。
+# 镜像脚本与 tests/atomgitPushMirror.test.mjs 保持与上游逐字一致，便于后续 merge。
+# 恢复镜像：删掉下面这行；或设 PI_DECK_ATOMGIT_URL 指向自己的 AtomGit 仓库。
+export PI_DECK_SKIP_ATOMGIT=1
+
 # node 缺失时放行：钩子不能让开发者的 push 因为环境缺东西而失败
 command -v node >/dev/null 2>&1 || {
 	echo "ℹ️  未找到 node，跳过 AtomGit 镜像（不影响本次 push）"

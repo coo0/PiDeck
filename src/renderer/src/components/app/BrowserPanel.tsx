@@ -7,6 +7,7 @@ import { Input } from "../ui-shadcn/input";
 // Button 收口状态（P0）：工具栏/导航/UA 菜单按钮已换 shadcn Button（ghost/outline + 原尺寸 class 保留）。
 // 保留原生：.browser-tab-close（16px 微型关闭钮，Button 最小档 icon-xs 24px 无法替代）。
 
+// 默认主页：本 fork 没有自己的文档站，继续用上游站点（文档内容对 fork 同样适用）。
 const DEFAULT_HOME = "https://ayuayue.github.io/PiDeck/";
 
 type DeviceType = "pc" | "mobile" | "tablet";

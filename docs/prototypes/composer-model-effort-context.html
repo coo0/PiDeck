@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<title>PiDeck 底栏 v6 · chip → 图1(pill+滑块) → 图2(选择模型)</title>
+<style>
+:root {
+  --font-family-base:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI","Microsoft YaHei UI","Microsoft YaHei","PingFang SC","HarmonyOS Sans SC","Hiragino Sans GB","Noto Sans CJK SC",sans-serif;
+  --font-family-mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono","Microsoft YaHei UI","PingFang SC",monospace;
+  --font-size-micro:11px; --font-size-caption:12px; --font-size-control:13px; --font-size-body:14px; --font-size-chat:15px;
+  --line-height-micro:16px; --line-height-caption:18px; --line-height-control:20px; --line-height-body:22px;
+  --color-bg-app:#ffffff; --color-bg-panel:#ffffff; --color-bg-popover:#ffffff; --color-bg-input:#ffffff;
+  --color-bg-muted:#f4f4f5; --color-bg-hover:#e5e7eb; --color-bg-active:#dfe3e8;
+  --color-text-primary:#202124; --color-text-secondary:#4b5563; --color-text-tertiary:#6b7280; --color-text-faint:#9fa3ac;
+  --color-border-subtle:#e5e5e5; --color-border-default:#dfdfdf; --color-border-strong:#d7d7d7;
+  --color-accent:#18181b; --color-accent-soft:#e5e7eb;
+  --color-danger:#b42318; --color-success:#15803d; --color-warning:#b7791f; --color-info:#2563eb;
+  --radius-xs:4px; --radius-sm:6px; --radius-md:8px; --radius-lg:10px; --radius-xl:12px;
+  --shadow-popover:0 4px 6px -1px rgba(9,9,11,.1), 0 2px 4px -2px rgba(9,9,11,.1);
+  --shadow-composer-lifted:0 1px 2px 0 rgba(9,9,11,.04), 0 1px 3px rgba(9,9,11,.06);
+  --row-active:#eef2e8;
+  /* 思考档位专属色（冷→暖 = 思考强度递增；避开 success 绿，避免与「成功」语义混淆） */
+  --lv-off:#6b7280; --lv-minimal:#3b82f6; --lv-low:#4f46e5; --lv-medium:#7c3aed;
+  --lv-high:#d97706; --lv-xhigh:#ea580c; --lv-max:#dc2626; --lv-ultra:#b91c1c;
+  --ctx-track:#e4e4e7; --ctx-ok:#2563eb; --ctx-ok2:#7c3aed; --ctx-warn:#c2820a; --ctx-warn2:#ea580c; --ctx-danger:#b42318;
+  --hatch-a:rgba(253,224,71,.75); --hatch-b:rgba(251,146,60,.68);
+}
+:root[data-theme="dark"] {
+  --color-bg-app:#121212; --color-bg-panel:#171717; --color-bg-popover:#1c1c1c; --color-bg-input:#171717;
+  --color-bg-muted:#262626; --color-bg-hover:#262626; --color-bg-active:#333333;
+  --color-text-primary:#ecece7; --color-text-secondary:#b8b8b2; --color-text-tertiary:#8a8a84; --color-text-faint:#a0a09a;
+  --color-border-subtle:#262626; --color-border-default:#2e2e2e; --color-border-strong:#3a3a3a;
+  --color-accent:#fafafa; --color-accent-soft:#2a2a2a;
+  --color-danger:#ef4444; --color-success:#4ade80; --color-warning:#d99a3c; --color-info:#60a5fa;
+  --shadow-popover:0 8px 24px -4px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4);
+  --shadow-composer-lifted:0 2px 16px rgba(0,0,0,.38), 0 1px 3px rgba(0,0,0,.3);
+  --row-active:#2b2f26;
+  /* 暗色档位色：整体提亮一档，保证在深底上有辨识度 */
+  --lv-off:#9ca3af; --lv-minimal:#60a5fa; --lv-low:#818cf8; --lv-medium:#a78bfa;
+  --lv-high:#f59e0b; --lv-xhigh:#fb923c; --lv-max:#f87171; --lv-ultra:#ef4444;
+  --ctx-track:#2e2e2e; --ctx-ok:#60a5fa; --ctx-ok2:#a78bfa; --ctx-warn:#eab308; --ctx-warn2:#f97316; --ctx-danger:#ef4444;
+  --hatch-a:rgba(253,224,71,.55); --hatch-b:rgba(251,146,60,.5);
+}
+* { box-sizing:border-box; }
+html,body { margin:0; padding:0; }
+body { background:var(--color-bg-app); color:var(--color-text-primary); font:var(--font-size-body)/var(--line-height-body) var(--font-family-base); -webkit-font-smoothing:antialiased; padding:26px 22px 90px; }
+.wrap { max-width:1060px; margin:0 auto; }
+h1 { font-size:19px; line-height:26px; font-weight:600; letter-spacing:-.3px; margin:0; }
+.sub { color:var(--color-text-tertiary); font-size:var(--font-size-control); margin:5px 0 22px; line-height:1.65; }
+code { font-family:var(--font-family-mono); background:var(--color-bg-muted); padding:1px 5px; border-radius:var(--radius-xs); font-size:.92em; }
+.section-label { font-size:var(--font-size-micro); font-weight:600; text-transform:uppercase; letter-spacing:.88px; color:var(--color-text-tertiary); margin:30px 0 11px; }
+.card { border:1px solid var(--color-border-subtle); border-radius:var(--radius-lg); background:var(--color-bg-panel); padding:17px; }
+.card h4 { margin:0 0 5px; font-size:var(--font-size-control); font-weight:600; }
+.card > p { margin:0 0 14px; color:var(--color-text-tertiary); font-size:var(--font-size-caption); line-height:1.65; }
+.note { color:var(--color-text-faint); font-size:var(--font-size-caption); line-height:1.7; }
+.tag { display:inline-block; margin-left:8px; padding:1px 7px; border-radius:999px; font-size:10px; font-weight:600; letter-spacing:.4px; text-transform:uppercase; background:var(--color-accent-soft); color:var(--color-text-secondary); vertical-align:2px; }
+
+/* ══ 会话框 ══ */
+.app { border:1px solid var(--color-border-subtle); border-radius:var(--radius-xl); background:var(--color-bg-app); position:relative; }
+.app-head { display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:1px solid var(--color-border-subtle); color:var(--color-text-tertiary); font-size:var(--font-size-caption); }
+.app-head .dot { width:9px; height:9px; border-radius:50%; background:var(--color-border-strong); }
+.transcript { padding:18px 22px 2px; display:flex; flex-direction:column; gap:11px; min-height:70px; }
+.msg-user { align-self:flex-end; max-width:60%; background:var(--color-bg-muted); border-radius:var(--radius-lg); padding:8px 13px; font-size:var(--font-size-chat); }
+.msg-ai { max-width:78%; color:var(--color-text-secondary); font-size:var(--font-size-chat); }
+.composer { padding:2px 16px 0; }
+.composer-box { border:1px solid var(--color-border-default); border-bottom:0; border-radius:20px 20px 0 0; background:var(--color-bg-panel); box-shadow:var(--shadow-composer-lifted); padding:11px 13px 0; }
+.composer-input { color:var(--color-text-faint); font-size:var(--font-size-chat); padding-bottom:9px; }
+
+/* ══ 底栏 ══ */
+.bar { display:flex; align-items:center; gap:7px; min-height:40px; padding:6px 1px 8px; }
+.zone { display:flex; align-items:center; gap:2px; min-width:0; }
+.zone.center { flex:1 1 auto; justify-content:center; }
+.zone.right { margin-left:auto; gap:7px; }
+.ico-btn { height:26px; min-width:26px; display:inline-flex; align-items:center; justify-content:center; gap:5px; padding:0 5px; border:0; background:transparent; color:var(--color-text-primary); border-radius:var(--radius-md); cursor:pointer; font:600 var(--font-size-caption)/1 var(--font-family-base); }
+.ico-btn:hover { background:var(--color-bg-hover); }
+.ico-btn.quiet { color:var(--color-text-tertiary); font-weight:500; }
+.hair-v { width:1px; height:15px; background:var(--color-border-default); flex:none; margin:0 2px; }
+.send { width:28px; height:28px; border-radius:999px; border:0; display:grid; place-items:center; cursor:pointer; background:var(--color-accent); color:var(--color-bg-app); }
+
+/* ══ 模型 chip（保持原样） ══ */
+.chip { position:relative; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 4px 0 8px; border-radius:var(--radius-md); border:1px solid transparent; background:transparent; cursor:pointer; transition:background-color .16s ease, border-color .16s ease; white-space:nowrap; }
+.chip:hover, .chip[data-open="true"] { background:var(--color-bg-muted); border-color:var(--color-border-subtle); }
+.chip .name { font-family:var(--font-family-mono); font-size:var(--font-size-control); font-weight:600; color:var(--color-text-primary); }
+.chip .name .prov { color:var(--color-text-tertiary); font-weight:500; }
+.chip .sep { color:var(--color-text-faint); margin:0 1px; }
+.chip .lv { font-size:var(--font-size-control); font-weight:500; color:var(--lv-color, var(--color-text-secondary)); }
+.chip .chev { color:var(--color-text-faint); display:grid; place-items:center; width:20px; height:22px; border-radius:var(--radius-sm); transition:transform .18s ease; }
+.chip[data-open="true"] .chev { transform:rotate(180deg); }
+
+/* ══════════════════════════════════════════════════════════
+   ★ 浮层容器：两个视图共用，宽度随视图动画（图1 230px ↔ 图2 452px）
+   ══════════════════════════════════════════════════════════ */
+/* 宿主：包住 chip 建立定位上下文（浮层按 chip 居中，而不是贴容器左边） */
+.chip-host { position:relative; display:inline-flex; }
+
+.popover {
+  position:absolute; bottom:calc(100% + 9px); overflow:hidden;
+  background:var(--color-bg-popover); color:var(--color-text-primary);
+  border:1px solid var(--color-border-default); border-radius:var(--radius-xl);
+  box-shadow:var(--shadow-popover); z-index:60;
+  /* 宽度由 JS 按内容量出后写成具体 px（见 placePop）：
+     短模型名 → 窄浮层，长模型名 → 宽浮层，触顶才截断。 */
+  transition:width .22s cubic-bezier(.16,.84,.24,1), left .22s cubic-bezier(.16,.84,.24,1);
+}
+.popover[data-view="effort"] { width:max-content; min-width:230px; max-width:min(430px,calc(100vw - 40px)); }
+.popover[data-view="models"] { width:452px; }
+.popover::after { content:""; position:absolute; left:0; right:0; bottom:-11px; height:11px; }
+.popover > .view { display:none; }
+.popover[data-view="effort"] > .view-effort { display:block; }
+.popover[data-view="models"] > .view-models { display:flex; flex-direction:column; max-height:min(500px,60vh); }
+
+/* ── 视图 1（参考图 1）：pill + 蓝色滑块 ── */
+.view-effort { display:flex; flex-direction:column; padding:14px 16px 16px; }
+.eff-pill {
+  display:flex; align-items:center; justify-content:center; gap:6px; height:26px;
+  min-width:0; padding:0 10px; border:0; border-radius:999px; background:var(--color-bg-active);
+  cursor:pointer; white-space:nowrap; transition:background-color .14s ease;
+}
+.eff-pill:hover { background:var(--color-bg-hover); }
+.eff-pill .m { font-size:var(--font-size-control); font-weight:600; color:var(--color-text-primary); font-family:var(--font-family-mono); min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.eff-pill .m .prov { color:var(--color-text-tertiary); font-weight:500; }
+.eff-pill .lv {
+  flex:none; font-size:var(--font-size-control); font-weight:500;
+  color:var(--lv-color, var(--color-text-tertiary)); font-family:var(--font-family-mono);
+  /* 固定宽度：档位名长度不一（off/high/xhigh/medium），若随文字变宽，
+     拖动改档位时浮层宽度会跟着变 → 轨道在拖动过程中被重新定位（手感发飘）。 */
+  min-width:46px; text-align:center;
+}
+.eff-pill .gt { flex:none; color:var(--color-text-faint); display:grid; place-items:center; }
+/* 滑块宽度跟随浮层（100%），但用 min-width 保证极窄时仍有可拖长度 */
+.eff-slider { position:relative; width:100%; min-width:198px; height:14px; margin-top:12px; border-radius:999px; background:var(--color-bg-active); cursor:ew-resize; touch-action:none; }
+.eff-slider .fill {
+  position:absolute; left:0; top:0; bottom:0; border-radius:999px;
+  /* 固定蓝色，不随档位变色：档位信息只由 pill 里的文字颜色承担，
+     滑块保持单一视觉语言，避免轨道每拖一档就换色、观感跳动。 */
+  background:linear-gradient(90deg, var(--color-info), color-mix(in srgb,var(--color-info) 78%, #fff 22%));
+  transition:width .18s cubic-bezier(.16,.84,.24,1);
+}
+.eff-slider .dots { position:absolute; inset:0; pointer-events:none; }
+.eff-slider .dots i { position:absolute; top:50%; width:3px; height:3px; border-radius:50%; background:rgba(255,255,255,.6); transform:translate(-50%,-50%); }
+.eff-slider .dots i[data-off="true"] { background:var(--color-text-faint); opacity:.65; }
+/* 滑块上方不再显示档位气泡（tips）：档位名已在 pill 里，颜色也已随档位变化 */
+.eff-slider .knob {
+  position:absolute; top:50%; width:18px; height:18px; border-radius:50%; background:#fff;
+  box-shadow:0 1px 4px rgba(0,0,0,.3), 0 0 0 2px color-mix(in srgb,var(--color-info) 45%, transparent);
+  transform:translate(-50%,-50%);
+  transition:left .18s cubic-bezier(.16,.84,.24,1), box-shadow .15s ease; z-index:2;
+}
+.eff-slider:hover .knob, .eff-slider[data-drag="true"] .knob { box-shadow:0 1px 6px rgba(0,0,0,.38), 0 0 0 4px color-mix(in srgb,var(--color-info) 26%, transparent); }
+
+/* ── 视图 2（参考图 2）：选择模型 ── */
+.vm-head { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:11px 13px; flex:none; }
+.vm-head h2 { margin:0; font-size:var(--font-size-body); font-weight:600; letter-spacing:-.1px; }
+.vm-head .acts { display:flex; align-items:center; gap:1px; flex:none; }
+.vm-head .acts button { width:26px; height:26px; display:grid; place-items:center; border:0; background:transparent; border-radius:var(--radius-sm); color:var(--color-text-tertiary); cursor:pointer; }
+.vm-head .acts button:hover { background:var(--color-bg-hover); color:var(--color-text-primary); }
+.vm-search { padding:0 13px 10px; flex:none; }
+.vm-search .box { display:flex; align-items:center; gap:8px; height:32px; padding:0 10px; border-radius:var(--radius-md); border:1px solid var(--color-border-default); background:var(--color-bg-input); }
+.vm-search .box svg { color:var(--color-text-faint); flex:none; }
+.vm-search input { flex:1; min-width:0; border:0; background:transparent; outline:0; color:var(--color-text-primary); font:var(--font-size-control)/1.4 var(--font-family-base); }
+.vm-search input::placeholder { color:var(--color-text-faint); }
+.vm-list { overflow-y:auto; min-height:0; padding-bottom:4px; }
+.vm-group { display:flex; align-items:center; gap:6px; width:100%; padding:7px 13px; border:0; background:transparent; cursor:pointer; text-align:left; font:500 var(--font-size-control)/1 var(--font-family-base); color:var(--color-text-secondary); }
+.vm-group:hover { background:var(--color-bg-hover); color:var(--color-text-primary); }
+.vm-group .gname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vm-group .cnt { font-family:var(--font-family-mono); font-size:var(--font-size-caption); color:var(--color-text-faint); flex:none; }
+.vm-group .trail { margin-left:auto; font-family:var(--font-family-mono); font-size:var(--font-size-caption); font-weight:600; color:var(--color-success); flex:none; }
+.vm-rows { padding:1px 5px 5px; }
+.vm-rows[hidden] { display:none; }
+.vm-row { display:flex; align-items:center; gap:6px; min-height:30px; padding:1px 8px; border-radius:var(--radius-md); cursor:pointer; }
+.vm-row:hover { background:var(--row-active); }
+.vm-row .star { width:24px; height:24px; display:grid; place-items:center; border:0; background:transparent; border-radius:var(--radius-sm); color:var(--color-text-faint); cursor:pointer; flex:none; }
+.vm-row .star:hover { background:var(--color-bg-active); }
+.vm-row .star[data-on="true"] { color:var(--color-text-primary); }
+.vm-row .nm { flex:1; min-width:0; font-family:var(--font-family-mono); font-size:var(--font-size-control); font-weight:500; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.vm-row .nm .prov { color:var(--color-text-faint); }
+.vm-row .eye { width:24px; height:24px; display:grid; place-items:center; border:0; background:transparent; border-radius:var(--radius-sm); color:var(--color-text-faint); cursor:pointer; opacity:0; flex:none; }
+.vm-row:hover .eye { opacity:.6; }
+.vm-row .eye:hover { background:var(--color-bg-active); opacity:1; color:var(--color-text-primary); }
+.vm-row .tick { width:16px; flex:none; color:var(--color-text-primary); }
+
+/* ══ 上下文图标：鲜明渐变圆环 ══ */
+.ctx { position:relative; display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 8px 0 5px; border-radius:var(--radius-md); border:1px solid transparent; background:transparent; cursor:pointer; transition:background-color .16s ease, border-color .16s ease; }
+.ctx:hover { background:var(--color-bg-muted); }
+.ctx[data-level="notice"] { border-color:color-mix(in srgb,var(--ctx-warn) 30%,transparent); }
+.ctx[data-level="warn"] { border-color:color-mix(in srgb,var(--ctx-warn2) 48%,transparent); }
+.ctx[data-level="danger"], .ctx[data-level="critical"] { border-color:color-mix(in srgb,var(--ctx-danger) 50%,transparent); }
+.ctx .ring { position:relative; width:19px; height:19px; border-radius:50%; flex:none; background:conic-gradient(from -90deg, var(--ring-a) 0deg, var(--ring-b) var(--ring-angle), var(--ctx-track) var(--ring-angle) 360deg); box-shadow:0 0 0 1px color-mix(in srgb,var(--ring-a) 22%,transparent); transition:box-shadow .2s ease; }
+.ctx .ring::after { content:""; position:absolute; inset:3px; border-radius:50%; background:var(--color-bg-panel); }
+.ctx[data-level="normal"] { --ring-a:var(--ctx-ok); --ring-b:var(--ctx-ok2); }
+.ctx[data-level="notice"], .ctx[data-level="warn"] { --ring-a:var(--ctx-warn); --ring-b:var(--ctx-warn2); }
+.ctx[data-level="danger"], .ctx[data-level="critical"] { --ring-a:var(--ctx-warn2); --ring-b:var(--ctx-danger); }
+.ctx:hover .ring { box-shadow:0 0 0 3px color-mix(in srgb,var(--ring-a) 26%,transparent); }
+.ctx .pct { font:700 var(--font-size-caption)/1 var(--font-family-mono); font-variant-numeric:tabular-nums; color:var(--color-text-primary); }
+.ctx[data-level="notice"] .pct, .ctx[data-level="warn"] .pct { color:var(--ctx-warn); }
+.ctx[data-level="danger"] .pct, .ctx[data-level="critical"] .pct { color:var(--ctx-danger); }
+.ctx .ring .warnarc { position:absolute; inset:-3px; border-radius:50%; opacity:0; transition:opacity .2s ease; background:conic-gradient(from -90deg, transparent 0deg, transparent var(--zone-start), var(--hatch-b) var(--zone-start), var(--hatch-a) 360deg); -webkit-mask:radial-gradient(circle, transparent 0 9.5px, #000 9.5px); mask:radial-gradient(circle, transparent 0 9.5px, #000 9.5px); }
+.ctx[data-warn="true"] .ring .warnarc { opacity:1; }
+
+/* ★ 扣血动画：从圆环向左飞出（ccm-hit-pop 曲线） */
+@keyframes hit-left {
+  0%   { opacity:0; transform:translate(0,-50%) scale(.68); }
+  11%  { opacity:1; transform:translate(-10px,-51%) scale(1); }
+  70%  { opacity:1; transform:translate(-52px,-54%) scale(1.2); }
+  100% { opacity:0; transform:translate(-72px,-56%) scale(1.32); }
+}
+.hitpop { position:absolute; right:100%; top:50%; margin-right:2px; z-index:9; font:800 var(--font-size-control)/1 var(--font-family-mono); white-space:nowrap; pointer-events:none; background:linear-gradient(92deg,#fff7ed 0%,#fecdd3 34%,#fb7185 66%,#f97316 100%); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; filter:drop-shadow(0 1px 0 rgba(0,0,0,.8)) drop-shadow(0 3px 9px rgba(0,0,0,.55)) drop-shadow(0 0 15px rgba(251,113,133,.55)); animation:hit-left 1800ms cubic-bezier(.16,.84,.24,1) forwards; will-change:opacity,transform,filter; }
+:root[data-theme="light"] .hitpop { background:linear-gradient(92deg,#9a3412 0%,#dc2626 42%,#ea580c 100%); -webkit-background-clip:text; background-clip:text; filter:drop-shadow(0 1px 0 rgba(255,255,255,.9)) drop-shadow(0 3px 9px rgba(180,35,24,.3)); }
+@keyframes ctx-pulse { 0%{transform:scale(1)} 28%{transform:scale(1.22)} 100%{transform:scale(1)} }
+.ctx.hit .ring { animation:ctx-pulse .62s cubic-bezier(.16,.84,.24,1); }
+
+/* 指标行 */
+.stats { display:flex; align-items:center; gap:9px; padding:7px 5px 9px; border-top:1px solid var(--color-border-subtle); font-size:var(--font-size-caption); color:var(--color-text-tertiary); overflow:hidden; white-space:nowrap; }
+.stats .grp { display:inline-flex; align-items:center; gap:5px; flex:none; }
+.stats .grp b { font-family:var(--font-family-mono); font-weight:600; color:var(--color-text-primary); font-variant-numeric:tabular-nums; }
+.stats .grp .k { color:var(--color-text-faint); }
+.stats .bal b { color:var(--color-success); }
+.stats .spacer { flex:1 1 auto; }
+
+.diagram { font-family:var(--font-family-mono); font-size:var(--font-size-caption); color:var(--color-text-tertiary); line-height:1.85; white-space:pre; overflow-x:auto; padding:14px; background:var(--color-bg-muted); border-radius:var(--radius-md); }
+.host { position:relative; }
+.grid2 { display:grid; gap:15px; grid-template-columns:repeat(auto-fit,minmax(400px,1fr)); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>PiDeck 底栏 v6 <span class="tag">chip → 图1 → 图2</span></h1>
+  <p class="sub">
+    底栏 chip 保持原样 → <b>点击弹出图1</b>（pill「5.6 Terra 极高 ›」+ 蓝色滑块）→ <b>图1 里的 pill 再点开图2</b>（选择模型列表）。
+    两级共用同一个浮层，宽度随层级动画（230px ↔ 452px）。上下文图标为鲜明渐变圆环，消耗动画从圆环向左飞出消失。
+  </p>
+
+  <div class="section-label">完整流程（可交互）</div>
+  <div class="app" id="appHost">
+    <div class="app-head"><span class="dot"></span><span>PiDeck</span><span style="opacity:.55">·</span><span>pideck-master</span></div>
+    <div class="transcript">
+      <div class="msg-user">点 chip → 图1 → pill → 图2</div>
+      <div class="msg-ai">点下面的模型名，先看图1，再点图1 里的胶囊看 图2。</div>
+    </div>
+    <div class="composer">
+      <div class="composer-box">
+        <div class="composer-input">输入消息，或按 / 使用命令…</div>
+        <div class="bar">
+          <div class="zone">
+            <button class="ico-btn" title="PiDeck">P</button>
+            <button class="ico-btn quiet">＋</button>
+            <button class="ico-btn quiet" title="安全控制">🛡⃠</button>
+            <button class="ico-btn quiet" title="快捷消息">💬</button>
+          </div>
+          <div class="zone center">
+            <span class="chip-host" id="chipHost">
+              <button class="chip" id="chip" data-open="false">
+                <span class="name" id="chipName"><span class="prov">pt/</span>deepseek-v4.1-flash</span>
+                <span class="sep">·</span>
+                <span class="lv" id="chipLevel">xhigh</span>
+                <span class="chev"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg></span>
+              </button>
+            </span>
+          </div>
+          <div class="zone right">
+            <div class="ctx" id="ctx" data-level="normal" data-warn="false">
+              <span class="ring" id="ring" style="--ring-angle:282deg"><span class="warnarc" id="warnarc" style="--zone-start:72deg"></span></span>
+              <span class="pct" id="pct">78%</span>
+            </div>
+            <span class="hair-v"></span>
+            <button class="ico-btn quiet" style="font-weight:500">custom ▾</button>
+            <button class="send" id="send"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
+          </div>
+        </div>
+      </div>
+      <div class="stats">
+        <span class="grp bal"><span class="k">余额</span><b>$16.78</b></span><span class="hair-v"></span>
+        <span class="grp"><b>3</b><span class="k">轮</span></span><span class="hair-v"></span>
+        <span class="grp"><span class="k">首token</span><b>1ms</b></span>
+        <span class="grp"><span class="k">回复</span><b>13.9s</b></span>
+        <span class="grp"><b>55</b><span class="k">tok/s</span></span><span class="hair-v"></span>
+        <span class="grp"><span class="k">缓存</span><b>99.8%</b></span><span class="hair-v"></span>
+        <span class="grp"><span class="k">输入</span><b>586K</b><span class="k">·输出</span><b>34.4K</b></span>
+        <span class="spacer"></span>
+        <span class="grp" style="color:var(--color-text-faint)">点 ↑ 看扣血动画</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="section-label">层级流程</div>
+  <div class="card">
+    <div class="diagram">① 底栏 chip（原样）
+   pt/deepseek-v4.1-flash · xhigh  ⌄        ← 点击
+              ↓
+② 图1：档位浮层（230px）
+   ┌────────────────────────┐
+   │   ┌ 5.6 Terra 极高 › ┐  │   ← pill，点击进入图2
+   │   ═════════════════●   │   ← 蓝色滑块，拖动改档位
+   └────────────────────────┘
+              ↓ 点 pill
+③ 图2：选择模型（452px，宽度动画过渡）
+   ┌──────────────────────────────────────────┐
+   │ 选择模型        ⇕ ⇵ ↻ ✕                  │
+   │ ┌ 搜索模型、供应商或 ID ──────────────┐  │
+   │ ⌄ 收藏 4                                 │
+   │   ★ pt/deepseek-v4.1-flash           ✓  │
+   │   ★ pt/GPT-5.6 Terra                     │
+   │ › pt 8 模型                    余额$15.83│
+   │ › deepseek 2 模型               余额$6.27│
+   └──────────────────────────────────────────┘
+              ↓ 选一个模型
+   自动回到图1（pill 更新为新模型，滑块可继续调档位）
+
+Esc 行为：在图2 按 Esc 回图1；在图1 按 Esc 关浮层
+外点：一律关闭</div>
+  </div>
+
+  <div class="section-label">上下文图标（鲜明渐变圆环）</div>
+  <div class="card">
+    <p>圆环用 <code>conic-gradient</code> 双色渐变，<b>颜色即状态</b>；剩余跌破 20% 时外圈浮出斜线弧（压缩预警）。</p>
+    <div class="host" style="display:flex;gap:16px;align-items:center;padding:12px 4px;flex-wrap:wrap">
+      <div class="ctx" data-level="normal"><span class="ring" style="--ring-angle:282deg"></span><span class="pct">78%</span></div>
+      <div class="ctx" data-level="notice"><span class="ring" style="--ring-angle:180deg"></span><span class="pct">50%</span></div>
+      <div class="ctx" data-level="warn" data-warn="true"><span class="ring" style="--ring-angle:108deg"><span class="warnarc" style="--zone-start:72deg"></span></span><span class="pct">30%</span></div>
+      <div class="ctx" data-level="danger" data-warn="true"><span class="ring" style="--ring-angle:54deg"><span class="warnarc" style="--zone-start:72deg"></span></span><span class="pct">15%</span></div>
+    </div>
+    <div class="note">正常 = 蓝→紫 · 预警 = 黄→橙 · 危险 = 橙→红。hover 有同色光晕。</div>
+  </div>
+
+  <div class="section-label">扣血动画轨迹（向左飞）</div>
+  <div class="card">
+    <div class="diagram">   ┌──────────┐
+   │  ◕ 78%   │ ← -1,240 tok ←←←←←←←←←←←←  从圆环向左飞出 72px
+   └──────────┘
+
+   0%    opacity 0   scale .68   x 0
+   11%   opacity 1   scale 1.0   x -10px    ← 快速登场
+   70%   opacity 1   scale 1.2   x -52px    ← 滑行 + 放大
+   100%  opacity 0   scale 1.32  x -72px    ← 放大淡出
+
+   1800ms · cubic-bezier(.16,.84,.24,1) · 队列串行 · 圆环同步 pulse</div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+
+  /* ── 模型目录 ── */
+  const MODELS = {
+    "pt/deepseek-v4.1-flash": { short:"deepseek-v4.1-flash", fav:true,  balance:"$15.83", efforts:["off","low","medium","high","xhigh","max"] },
+    "pt/GPT-5.6 Terra":       { short:"GPT-5.6 Terra",       fav:true,  balance:"$15.83", efforts:["low","medium","high","xhigh","max","ultra"] },
+    "pt/gpt-5.6-sol":         { short:"5.6 Sol",             fav:true,  balance:"$15.83", efforts:["low","medium","high","xhigh","max","ultra"] },
+    "pt/gpt-6-astra":         { short:"6 Astra",             fav:true,  balance:"$15.83", efforts:["low","medium","high","xhigh","max"] },
+    "pt/gpt-5.6-luna":        { short:"5.6 Luna",            fav:false, balance:"$15.83", efforts:["low","medium","high","xhigh","max"] },
+    "pt/gpt-5.5":             { short:"5.5",                 fav:false, balance:"$15.83", efforts:["low","medium","high","xhigh"] },
+    "pt/o4-mini":             { short:"o4-mini",             fav:false, balance:"$15.83", efforts:["low","medium","high"] },
+    "deepseek/deepseek-v4.1": { short:"deepseek-v4.1",       fav:false, balance:"$6.27",  efforts:["off","low","medium","high","xhigh","max"] },
+    "deepseek/deepseek-v3.2": { short:"deepseek-v3.2",       fav:false, balance:"$6.27",  efforts:["low","medium","high","max"] },
+    "anthropic/claude-sonnet-4.6": { short:"claude-sonnet-4.6", fav:false, balance:"$4.20", efforts:["low","medium","high","max"] },
+    "anthropic/claude-opus-4.6":   { short:"claude-opus-4.6",   fav:false, balance:"$4.20", efforts:["low","medium","high","max"] },
+    "google/gemini-3-pro":         { short:"gemini-3-pro",      fav:false, balance:"$8.10", efforts:["low","medium","high"] },
+  };
+  const LEVEL_ZH = { off:"关闭", minimal:"极简", low:"低", medium:"中", high:"高", xhigh:"极高", max:"最高", ultra:"Ultra" };
+  /* 每个思考档位一个专属色（CSS 变量在 foundation 层定义，此处只负责映射） */
+  const LEVEL_COLOR_VAR = {
+    off:"--lv-off", minimal:"--lv-minimal", low:"--lv-low", medium:"--lv-medium",
+    high:"--lv-high", xhigh:"--lv-xhigh", max:"--lv-max", ultra:"--lv-ultra",
+  };
+  /** 档位色：未知档位回退到次色，避免变量缺失导致颜色失效 */
+  function levelColor(effort) {
+    return `var(${LEVEL_COLOR_VAR[effort] ?? "--color-text-secondary"})`;
+  }
+
+  const state = { key:"pt/deepseek-v4.1-flash", effort:"xhigh", left:78.4, collapsed:new Set(), search:"", view:"effort" };
+/** 上次量过宽度的模型 key：仅模型变化时才重新计算浮层宽度 */
+let lastMeasuredKey = null;
+  const spec = () => MODELS[state.key];
+  const efforts = () => spec().efforts;
+  const eIdx = () => Math.max(0, efforts().indexOf(state.effort));
+  /* ── 底栏 chip（原样） ── */
+  function renderChip() {
+    const [prov, ...rest] = state.key.split("/");
+    $("chipName").innerHTML = `<span class="prov">${prov}/</span>${rest.join("/")}`;
+    $("chipLevel").textContent = state.effort;
+    $("chipLevel").style.setProperty("--lv-color", levelColor(state.effort));
+  }
+
+  /* ── 浮层（两个视图） ── */
+  let pop = null;
+  const ICON = {
+    expand:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 15 5 5 5-5M7 9l5-5 5 5"/></svg>',
+    collapse:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m7 20 5-5 5 5M7 4l5 5 5-5"/></svg>',
+    refresh:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v5h-5"/></svg>',
+    close:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    star:(on)=>`<svg width="14" height="14" viewBox="0 0 24 24" fill="${on?"currentColor":"none"}" stroke="currentColor" stroke-width="1.7"><path d="m12 3 2.7 5.6 6.3.9-4.5 4.4 1 6.2-5.5-3-5.5 3 1-6.2L3 9.5l6.3-.9Z"/></svg>`,
+    eye:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 3l18 18M10.6 10.6A2 2 0 0 0 12 14a2 2 0 0 0 1.4-.6M6.7 6.7C4.6 8 3 10 2 12c1.7 3.4 5.5 6 10 6 1.6 0 3-.3 4.3-.9M9.9 5.2A9.5 9.5 0 0 1 12 5c4.5 0 8.3 2.6 10 7-.6 1.3-1.5 2.5-2.6 3.5"/></svg>',
+    tick:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="m5 13 4 4L19 7"/></svg>',
+    chevron:(open)=>`<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" style="transform:rotate(${open?0:-90}deg);transition:transform .15s"><path d="m6 9 6 6 6-6"/></svg>`,
+    gt:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="m9 6 6 6-6 6"/></svg>',
+    search:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  };
+
+  /* 视图 1：pill + 蓝色滑块（参考图 1） */
+  /* pill 文案与底栏 chip 同构：厂商前缀 + 模型名 + 英文小写档位（max/xhigh/…） */
+  function pillModelHtml() {
+    const [prov, ...rest] = state.key.split("/");
+    return `<span class="prov">${prov}/</span>${spec().short ?? rest.join("/")}`;
+  }
+  function effortHtml() {
+    return `<div class="view view-effort">
+      <button class="eff-pill" id="effPill" title="打开模型列表">
+        <span class="m">${pillModelHtml()}</span>
+        <span class="lv" style="--lv-color:${levelColor(state.effort)}">${state.effort}</span>
+        <span class="gt">${ICON.gt}</span>
+      </button>
+      <div class="eff-slider" id="effSlider" role="slider" tabindex="0" aria-label="思考强度">
+        <span class="fill" id="effFill"></span>
+        <span class="dots" id="effDots"></span>
+        <span class="knob" id="effKnob"></span>
+      </div>
+    </div>`;
+  }
+
+  /* 视图 2：选择模型（参考图 2） */
+  const matches = (k) => { const q = state.search.trim().toLowerCase(); return !q || k.toLowerCase().includes(q); };
+  function listHtml() {
+    const keys = Object.keys(MODELS);
+    const favs = keys.filter(k => MODELS[k].fav && matches(k));
+    const groups = {};
+    keys.filter(matches).forEach(k => { const p = k.split("/")[0]; (groups[p] ||= []).push(k); });
+    const open = (id) => state.search.trim() ? true : !state.collapsed.has(id);
+    const row = (k) => {
+      const m = MODELS[k], cur = k === state.key;
+      return `<div class="vm-row" data-pick="${k}">
+        <button class="star" data-fav="${k}" data-on="${m.fav}" title="收藏 / 取消收藏">${ICON.star(m.fav)}</button>
+        <span class="nm" title="${k}"><span class="prov">${k.split("/")[0]}/</span>${k.split("/").slice(1).join("/")}</span>
+        <button class="eye" title="隐藏此模型">${ICON.eye}</button>
+        ${cur ? `<span class="tick">${ICON.tick}</span>` : ""}
+      </div>`;
+    };
+    const block = (id, label, cnt, trail, rows) => `
+      <button class="vm-group" data-group="${id}">${ICON.chevron(open(id))}<span class="gname">${label}</span><span class="cnt">${cnt}</span>${trail?`<span class="trail">${trail}</span>`:""}</button>
+      <div class="vm-rows" ${open(id)?"":"hidden"}>${rows}</div>`;
+    let html = "";
+    if (favs.length) html += block("fav", "收藏", favs.length, "", favs.map(row).join(""));
+    for (const [p, list] of Object.entries(groups)) html += block(p, p, `${list.length} 模型`, `余额${MODELS[list[0]].balance}`, list.map(row).join(""));
+    return html || `<div style="padding:22px;text-align:center;color:var(--color-text-faint);font-size:var(--font-size-caption)">没有匹配的模型</div>`;
+  }
+  function modelsHtml() {
+    return `<div class="view view-models">
+      <div class="vm-head"><h2>选择模型</h2><div class="acts">
+        <button data-act="expand" title="展开全部">${ICON.expand}</button>
+        <button data-act="collapse" title="折叠全部">${ICON.collapse}</button>
+        <button data-act="refresh" title="刷新模型列表">${ICON.refresh}</button>
+        <button data-act="close" title="关闭">${ICON.close}</button>
+      </div></div>
+      <div class="vm-search"><div class="box">${ICON.search}
+        <input id="vmInput" placeholder="搜索模型、供应商或 ID" value="${state.search}" />
+      </div></div>
+      <div class="vm-list" id="vmList">${listHtml()}</div>
+    </div>`;
+  }
+
+  function renderPop() {
+    const keepFocus = pop?.dataset.view === "models" && state.view === "models";
+    if (pop) pop.remove();
+    pop = document.createElement("div");
+    pop.className = "popover";
+    pop.dataset.view = state.view;
+    pop.innerHTML = effortHtml() + modelsHtml();
+    // 挂到 chip 宿主（不是 appHost）：定位上下文贴着 chip，浮层才会落在模型名上方
+    $("chipHost").appendChild(pop);
+    $("chip").dataset.open = "true";
+    placePop();
+    if (state.view === "effort") { renderEffort(); bindEffort(); }
+    else { bindModels(); if (!keepFocus) pop.querySelector("#vmInput")?.focus(); }
+  }
+
+  /**
+   * 浮层定位：宽度先按内容量出（CSS 的 max-content + min/max-width 已做过钳制），
+   * 再写成具体 px（否则宽度过渡无从计算），最后按 chip 居中并在应用边界内钳制。
+   *
+   * 为什么不能直接用 offsetWidth 当宽度：宽度过渡期间读到的是中间值，
+   * 用它算 left 会让浮层在动画里左右抖动。
+   */
+  const MODELS_WIDTH = 452;
+  function placePop() {
+    if (!pop) return;
+    const host = $("chipHost"), app = $("appHost");
+    // 1. 量出内容宽度：max-content 让 CSS 的 min/max-width 先钳制，读到的就是最终值
+    let w = MODELS_WIDTH;
+    if (state.view === "effort") {
+      pop.style.width = "max-content";
+      w = pop.offsetWidth;
+    }
+    pop.style.width = `${w}px`;
+    // 2. 按 chip 居中，再钳制在应用内（左右各留 8px）
+    const hostRect = host.getBoundingClientRect();
+    const appRect = app.getBoundingClientRect();
+    const centered = hostRect.width / 2 - w / 2;
+    const min = appRect.left + 8 - hostRect.left;
+    const max = appRect.right - 8 - w - hostRect.left;
+    pop.style.left = `${Math.round(Math.max(min, Math.min(max, centered)))}px`;
+  }
+
+  /* ── 视图 1 渲染 + 交互 ── */
+  function renderEffort() {
+    if (!pop || state.view !== "effort") return;
+    const list = efforts(), i = eIdx(), n = list.length;
+    const pill = pop.querySelector("#effPill");
+    pill.querySelector(".m").innerHTML = pillModelHtml();
+    const lv = pill.querySelector(".lv");
+    lv.textContent = state.effort;
+    lv.style.setProperty("--lv-color", levelColor(state.effort));
+
+    // 宽度只跟模型名走：档位名已固定宽度，拖动改档位不会改变浮层尺寸。
+    // 仅在模型变化时重新量宽（否则每次拖动都重定位，轨道会在手底下漂移）。
+    if (lastMeasuredKey !== state.key) {
+      lastMeasuredKey = state.key;
+      placePop();
+    }
+
+    const sl = pop.querySelector("#effSlider");
+    const w = sl.clientWidth || 198, inset = 9;
+    const pct = n > 1 ? i / (n - 1) : 0;
+    const x = inset + pct * (w - inset * 2);
+    pop.querySelector("#effFill").style.width = x + "px";
+    pop.querySelector("#effKnob").style.left = x + "px";
+    pop.querySelector("#effDots").innerHTML = list.map((_, k) => {
+      const dx = inset + (n > 1 ? k / (n - 1) : 0) * (w - inset * 2);
+      return `<i style="left:${dx}px" data-off="${k > i}"></i>`;
+    }).join("");
+  }
+  function bindEffort() {
+    pop.querySelector("#effPill").addEventListener("click", (e) => { e.stopPropagation(); state.view = "models"; renderPop(); });
+    const sl = pop.querySelector("#effSlider");
+    let drag = false;
+    const apply = (clientX) => {
+      const list = efforts(), r = sl.getBoundingClientRect(), inset = 9;
+      const t = Math.max(0, Math.min(1, (clientX - r.left - inset) / Math.max(1, r.width - inset * 2)));
+      state.effort = list[Math.round(t * (list.length - 1))];
+      renderEffort(); renderChip();
+    };
+    sl.addEventListener("pointerdown", (e) => {
+      drag = true; sl.dataset.drag = "true";
+      // setPointerCapture 在无活动指针时会抛 NotFoundError（合成事件/极端时序），
+      // 不能让异常打断后面的 apply——否则一次拖动直接失效。
+      try { sl.setPointerCapture(e.pointerId); } catch { /* 捕获失败不影响拖动 */ }
+      apply(e.clientX); e.stopPropagation(); e.preventDefault();
+    });
+    sl.addEventListener("pointermove", (e) => { if (drag) apply(e.clientX); });
+    const end = () => { drag = false; delete sl.dataset.drag; };
+    sl.addEventListener("pointerup", end); sl.addEventListener("pointercancel", end);
+    sl.addEventListener("pointerup", () => spend(180 + Math.floor(Math.random() * 420)));
+    sl.addEventListener("keydown", (e) => {
+      const list = efforts(), i = eIdx(); let n = null;
+      if (e.key === "ArrowLeft" || e.key === "ArrowDown") n = i - 1;
+      else if (e.key === "ArrowRight" || e.key === "ArrowUp") n = i + 1;
+      else if (e.key === "Home") n = 0; else if (e.key === "End") n = list.length - 1;
+      if (n == null) return;
+      e.preventDefault(); state.effort = list[Math.max(0, Math.min(list.length - 1, n))]; renderEffort(); renderChip();
+    });
+  }
+
+  /* ── 视图 2 交互 ── */
+  function bindModels() {
+    const input = pop.querySelector("#vmInput");
+    input.addEventListener("input", () => {
+      state.search = input.value;
+      pop.querySelector("#vmList").innerHTML = listHtml();
+      const el = pop.querySelector("#vmInput"); el.focus();
+    });
+    pop.addEventListener("click", (e) => {
+      const act = e.target.closest("[data-act]");
+      if (act) {
+        const a = act.dataset.act;
+        if (a === "close") { closePop(); return; }
+        if (a === "refresh") { act.style.opacity=".4"; setTimeout(()=>act.style.opacity="",700); return; }
+        const ids = ["fav", ...new Set(Object.keys(MODELS).map(k=>k.split("/")[0]))];
+        state.collapsed = a === "collapse" ? new Set(ids) : new Set();
+        pop.querySelector("#vmList").innerHTML = listHtml(); return;
+      }
+      const st = e.target.closest("[data-fav]");
+      if (st) { e.stopPropagation(); const k = st.dataset.fav; MODELS[k].fav = !MODELS[k].fav; pop.querySelector("#vmList").innerHTML = listHtml(); return; }
+      if (e.target.closest(".eye")) { e.stopPropagation(); return; }
+      const g = e.target.closest("[data-group]");
+      if (g) { const id = g.dataset.group; state.collapsed.has(id) ? state.collapsed.delete(id) : state.collapsed.add(id); pop.querySelector("#vmList").innerHTML = listHtml(); return; }
+      const r = e.target.closest("[data-pick]");
+      if (r) {
+        state.key = r.dataset.pick;
+        const list = efforts();
+        if (!list.includes(state.effort)) state.effort = list[Math.min(4, list.length - 1)];
+        state.view = "effort";              // 选完自动回到图1，可继续调档位
+        renderChip(); renderPop();
+      }
+    });
+  }
+
+  /* ── 开关 / Esc / 外点 ── */
+  function openPop() { if (pop) return; state.view = "effort"; renderPop(); setTimeout(() => document.addEventListener("pointerdown", onDoc, true), 0); }
+  function closePop() { if (pop) pop.remove(); pop = null; lastMeasuredKey = null; $("chip").dataset.open = "false"; document.removeEventListener("pointerdown", onDoc, true); }
+  function onDoc(e) { if (!pop) return; if (e.target.closest(".popover") || e.target.closest("#chip")) return; closePop(); }
+  $("chip").addEventListener("click", (e) => { e.stopPropagation(); pop ? closePop() : openPop(); });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape" || !pop) return;
+    if (state.view === "models") { state.view = "effort"; state.search = ""; renderPop(); }  // Esc 逐级返回
+    else closePop();
+  });
+  window.addEventListener("resize", () => { placePop(); if (state.view === "effort") renderEffort(); });
+
+  /* ── 上下文 + 扣血 ── */
+  const WINDOW = 1_000_000;
+  const fmt = (n) => Math.round(n).toLocaleString("en-US");
+  const queue = []; let active = null;
+  const levelOf = (p) => p <= 30 ? "critical" : p <= 40 ? "danger" : p <= 50 ? "warn" : p <= 60 ? "notice" : "normal";
+  const ctx = $("ctx"), ring = $("ring"), pctEl = $("pct"), warnarc = $("warnarc");
+  function renderCtx() {
+    const p = state.left, level = levelOf(p);
+    ctx.dataset.level = level; ctx.dataset.warn = String(p <= 20);
+    ring.style.setProperty("--ring-angle", (p * 3.6).toFixed(1) + "deg");
+    warnarc.style.setProperty("--zone-start", (20 * 3.6).toFixed(1) + "deg");
+    pctEl.textContent = Math.round(p) + "%";
+    ctx.title = ["Context", `Left: ${fmt(WINDOW*p/100)} Tokens (${p.toFixed(1)}%)`, `Used: ${fmt(WINDOW*(100-p)/100)} Tokens (${(100-p).toFixed(1)}%)`, `Total: ${fmt(WINDOW)} Tokens`].join(" | ");
+  }
+  function playNext() {
+    if (active) return;
+    const text = queue.shift(); if (!text) return;
+    const el = document.createElement("span");
+    el.className = "hitpop"; el.textContent = text;
+    active = el; ctx.appendChild(el);
+    const done = () => { if (active !== el) return; el.remove(); active = null; playNext(); };
+    el.addEventListener("animationend", done); setTimeout(done, 2200);
+  }
+  function spend(delta) {
+    queue.push("-" + fmt(delta) + " tok"); playNext();
+    ctx.classList.remove("hit"); void ctx.offsetWidth; ctx.classList.add("hit");
+    state.left = Math.max(0.5, state.left - (delta / WINDOW) * 100); renderCtx();
+  }
+  $("send").addEventListener("click", () => spend(320 + Math.floor(Math.random() * 1500)));
+  $("pct").addEventListener("dblclick", () => { state.left = 78.4; renderCtx(); });
+
+  renderChip(); renderCtx();
+})();
+</script>
+</body>
+</html>

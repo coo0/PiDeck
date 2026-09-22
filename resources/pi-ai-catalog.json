@@ -8431,6 +8431,121 @@
       "maxTokens": 32768
     },
     {
+      "id": "muse-spark-1.1",
+      "name": "Muse Spark 1.1",
+      "provider": "meta",
+      "api": "openai-responses",
+      "baseUrl": "https://api.meta.ai/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      }
+    },
+    {
+      "id": "muse-spark-1.2",
+      "name": "Muse Spark 1.2",
+      "provider": "meta",
+      "api": "openai-responses",
+      "baseUrl": "https://api.meta.ai/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      }
+    },
+    {
+      "id": "muse-spark-1.2-contributor",
+      "name": "Muse Spark 1.2 Contributor",
+      "provider": "meta",
+      "api": "openai-responses",
+      "baseUrl": "https://api.meta.ai/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      }
+    },
+    {
+      "id": "muse-spark-1.3",
+      "name": "Muse Spark 1.3",
+      "provider": "meta",
+      "api": "openai-responses",
+      "baseUrl": "https://api.meta.ai/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": "max"
+      }
+    },
+    {
+      "id": "muse-spark-1.3-contributor",
+      "name": "Muse Spark 1.3 Contributor",
+      "provider": "meta",
+      "api": "openai-responses",
+      "baseUrl": "https://api.meta.ai/v1",
+      "reasoning": true,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 1048576,
+      "maxTokens": 131072,
+      "thinkingLevelMap": {
+        "off": null,
+        "minimal": "minimal",
+        "low": "low",
+        "medium": "medium",
+        "high": "high",
+        "xhigh": "xhigh",
+        "max": null
+      }
+    },
+    {
       "id": "MiniMax-M2.7",
       "name": "MiniMax-M2.7",
       "provider": "minimax-cn",
@@ -13152,28 +13267,6 @@
       }
     },
     {
-      "id": "deepseek/deepseek-v4-flash-0731:free",
-      "name": "DeepSeek: DeepSeek V4 Flash 0731 (free)",
-      "provider": "openrouter",
-      "api": "openai-completions",
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "reasoning": true,
-      "input": [
-        "text"
-      ],
-      "contextWindow": 1048576,
-      "maxTokens": 393216,
-      "thinkingLevelMap": {
-        "off": "none",
-        "minimal": null,
-        "low": "low",
-        "medium": null,
-        "high": "high",
-        "xhigh": null,
-        "max": "max"
-      }
-    },
-    {
       "id": "deepseek/deepseek-v4-flash-vision-exp",
       "name": "DeepSeek: DeepSeek V4 Flash Vision Exp",
       "provider": "openrouter",
@@ -13252,7 +13345,7 @@
         "text"
       ],
       "contextWindow": 1048576,
-      "maxTokens": 393216,
+      "maxTokens": 384000,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -14224,7 +14317,7 @@
         "image"
       ],
       "contextWindow": 131072,
-      "maxTokens": 117964,
+      "maxTokens": 16384,
       "thinkingLevelMap": {
         "off": null,
         "minimal": null,
@@ -14772,6 +14865,20 @@
         "xhigh": null,
         "max": null
       }
+    },
+    {
+      "id": "mistralai/mistral-small-3.1-24b-instruct",
+      "name": "Mistral: Mistral Small 3.1 24B",
+      "provider": "openrouter",
+      "api": "openai-completions",
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "reasoning": false,
+      "input": [
+        "text",
+        "image"
+      ],
+      "contextWindow": 128000,
+      "maxTokens": 102400
     },
     {
       "id": "mistralai/mistral-small-3.2-24b-instruct",
@@ -17368,8 +17475,8 @@
         "text",
         "image"
       ],
-      "contextWindow": 262144,
-      "maxTokens": 65536
+      "contextWindow": 256000,
+      "maxTokens": 16384
     },
     {
       "id": "qwen/qwen3.5-397b-a17b",
@@ -17396,8 +17503,8 @@
         "text",
         "image"
       ],
-      "contextWindow": 262144,
-      "maxTokens": 235929
+      "contextWindow": 256000,
+      "maxTokens": 32768
     },
     {
       "id": "qwen/qwen3.5-9b:batch",
@@ -17620,7 +17727,7 @@
         "text",
         "image"
       ],
-      "contextWindow": 262144,
+      "contextWindow": 1000000,
       "maxTokens": 131072,
       "thinkingLevelMap": {
         "off": "none",
@@ -18671,8 +18778,8 @@
       "input": [
         "text"
       ],
-      "contextWindow": 1048576,
-      "maxTokens": 393216,
+      "contextWindow": 1024000,
+      "maxTokens": 384000,
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
@@ -18924,7 +19031,7 @@
         "image"
       ],
       "contextWindow": 1048576,
-      "maxTokens": 131072,
+      "maxTokens": 943718,
       "thinkingLevelMap": {
         "off": null,
         "minimal": null,
@@ -19881,7 +19988,7 @@
         "off": null,
         "minimal": null,
         "low": "low",
-        "medium": "medium",
+        "medium": null,
         "high": "high",
         "xhigh": null,
         "max": "max"
@@ -20007,6 +20114,7 @@
       "contextWindow": 1000000,
       "maxTokens": 128000,
       "thinkingLevelMap": {
+        "off": null,
         "xhigh": "xhigh",
         "max": "max"
       }
@@ -20045,7 +20153,7 @@
     },
     {
       "id": "deepseek-v4-flash",
-      "name": "DeepSeek V4 Flash",
+      "name": "DeepSeek V4.1 Flash",
       "provider": "radius",
       "api": "pi-messages",
       "baseUrl": "https://radius.pi.dev/v1",
@@ -20096,7 +20204,16 @@
         "text"
       ],
       "contextWindow": 1000000,
-      "maxTokens": 384000
+      "maxTokens": 384000,
+      "thinkingLevelMap": {
+        "off": "none",
+        "minimal": null,
+        "low": "low",
+        "medium": null,
+        "high": "high",
+        "xhigh": null,
+        "max": "max"
+      }
     },
     {
       "id": "glm-5.2",
@@ -20113,8 +20230,8 @@
       "thinkingLevelMap": {
         "off": "none",
         "minimal": null,
-        "low": "high",
-        "medium": "high",
+        "low": null,
+        "medium": null,
         "high": "high",
         "xhigh": null,
         "max": "max"
@@ -20221,7 +20338,7 @@
         "text",
         "image"
       ],
-      "contextWindow": 272000,
+      "contextWindow": 400000,
       "maxTokens": 128000,
       "thinkingLevelMap": {
         "off": "none",
@@ -20382,7 +20499,7 @@
         "off": null,
         "minimal": null,
         "low": "low",
-        "medium": "medium",
+        "medium": null,
         "high": "high",
         "xhigh": null,
         "max": "max"

@@ -525,8 +525,10 @@ export function CopyMenu(props: { text: string; markdown: string; targetRef: Rea
 				</Button>
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
-						<Button variant="ghost" size="icon-sm" className="size-6 rounded-none border-l border-border/60 px-0.5 text-muted-foreground hover:bg-muted hover:text-foreground" type="button" aria-label={t("copy.moreOptions")} title={t("copy.moreOptions")}>
-							<ChevronDown size={12} />
+						{/* 展开菜单的半边与主按钮同规格（size-7 / 图标 14）：原来的 24px 窄按钮 + 12px 图标
+						    比同排其它操作图标小一号，是「图标大小不一」的来源；竖线分隔保留（两块仍是一个控件）。 */}
+						<Button variant="ghost" size="icon-sm" className="size-7 rounded-none border-l border-border/60 text-muted-foreground hover:bg-muted hover:text-foreground" type="button" aria-label={t("copy.moreOptions")} title={t("copy.moreOptions")}>
+							<ChevronDown size={14} />
 						</Button>
 					</DropdownMenuTrigger>
 					{/* 保留 copy-menu-popover 锚点类：多选导出/截图复制仍靠它排除菜单节点 */}

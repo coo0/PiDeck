@@ -56,6 +56,11 @@ export type SidebarActions = {
 	sessions: {
 		/** 单击默认 preview；双击传 permanent。侧栏拖拽分屏也会走 open。 */
 		open: (projectId: string, sessionId: string, tabMode?: "preview" | "permanent") => Promise<void>;
+		/**
+		 * 按需预加载会话 catalog：活动页「最近会话」要跨项目数据，而 catalog 平时只在
+		 * 展开/选中项目时才扫描。已在 loading/ready 的项目会被跳过，不会重复触发扫描。
+		 */
+		ensureCatalogsLoaded: (projectIds: readonly string[]) => void;
 		/** 侧栏会话开始拖拽（与 Tab 栏共用 MIME，可拖到聊天区边缘分屏） */
 		beginDrag?: (sessionId: string) => void;
 		endDrag?: () => void;

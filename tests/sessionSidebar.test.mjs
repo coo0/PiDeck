@@ -115,6 +115,12 @@ test("Session tree keys use catalog SessionRecord identity, including child rows
 	assert.doesNotMatch(source, /key=\{child\.session\.filePath\}/);
 });
 
+test("active sidebar rows use the bound catalog title before a transient AgentTab title", () => {
+	const source = readFileSync("src/renderer/src/components/sidebar/SessionTree.tsx", "utf8");
+	assert.match(source, /const displayTitle = agentSession \? \("title" in agentSession \? agentSession\.title : agentSession\.name \|\| child\.agent\.title\) : child\.agent\.title;/);
+	assert.match(source, /<TitleScrollText text=\{displayTitle\} className="font-medium"/);
+});
+
 test("runtime context authorization uses the record binding instead of a same-path agent", () => {
 	const { getBoundSidebarRuntimeAgent } = loadControllerModule();
 	const catalog = {

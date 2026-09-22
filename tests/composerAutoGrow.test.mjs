@@ -24,7 +24,10 @@ test("composer is intrinsic chrome inside the timeline column, not a resizable p
 	assert.doesNotMatch(sessionView, /growComposerWithinTimelineBudget/);
 	assert.match(sessionView, /id="timeline"/);
 	assert.match(sessionView, /session-v-composer/);
-	assert.match(sessionView, /maxHeight: `min\(\$\{COMPOSER_MAX_HEIGHT\}px, calc\(100% - var\(--session-timeline-min/);
+	// 上限走 composerMaxHeight 常量；ask 待答期间坍缩到 0px 让位（见 askLayoutRegression），
+	// 其余情况仍是 COMPOSER_MAX_HEIGHT + 对话区保底。
+	assert.match(sessionView, /maxHeight: composerMaxHeight/);
+	assert.match(sessionView, /const composerMaxHeight = askPanelVisible \? "0px" : `min\(\$\{COMPOSER_MAX_HEIGHT\}px, calc\(100% - var\(--session-timeline-min/);
 	assert.match(sessionView, /session-v-timeline-stage/);
 	assert.match(foundation, /\.session-v-composer \.composer \{[\s\S]*?height:\s*auto;/);
 	assert.doesNotMatch(foundation, /\.session-v-timeline > \*/);
@@ -37,9 +40,11 @@ test("footer sizes to content and does not hug a measured pixel height", () => {
 	assert.doesNotMatch(composerArea, /ResizeObserver/);
 	assert.doesNotMatch(composerArea, /defaultHeight/);
 	assert.match(composerArea, /style=\{composerFooterStyle\(\)\}/);
-	// widget 卡片共用这一层纵向滚动；必须预留原生 thin scrollbar 槽位，
-	// 否则临界溢出时滚动条开关会改变卡片宽度并触发二次布局。
-	assert.match(composerArea, /className="[^"]*overflow-y-auto[^"]*\[scrollbar-gutter:stable\][^"]*"/);
+	// widget 卡片列不预留 scrollbar 槽位：卡片必须与输入框/消息列同宽（同源 100%）。
+	// 待办条的滚动条闪烁由旋转图标 AABB 撑高 scrollHeight 引起，应在 SessionTodoStrip 修
+	// （见 sessionTodoStrip 契约测试），不要在这层加 scrollbar-gutter 兜底。
+	assert.match(composerArea, /className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain pb-px empty:hidden"/);
+	assert.doesNotMatch(composerArea, /overflow-y-auto[^"]*\[scrollbar-gutter:stable\]/);
 	// 输入卡可收缩：终端展开后列被 max-height 卡住时，输入区变矮并把滚动交给编辑器；
 	// 写死 shrink-0 会把底栏（模型/发送钮）挤出列外被终端盖住。
 	assert.match(composerArea, /composer-box relative flex min-h-0[^"]*flex-col/);

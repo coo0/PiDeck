@@ -14,6 +14,14 @@ Single source of repository rules for AI assistants and contributors. Historical
 
 Backends: `AgentBackend = "pi" | "dsh" | "imagegen"` (`src/shared/types/agent.ts`). `imagegen` runs no agent at all — it is a local image-generation session store.
 
+**唯一例外：认证通道（`pi-auth`，边界不得扩大）**
+
+- 为什么需要例外：pi 的供应商登录（CLI 里的 `/login`）只存在于它的**交互层** —— RPC 方法表没有 auth 入口，扩展 API 也不提供登录。PiDeck 要用自己的弹框完成登录，只能直接调 pi 官方的认证 API。
+- 允许的做法：主进程以子进程方式运行 `resources/pi-auth-host.mjs`（认证助手），由它 import pi 包内 `dist/index.js` 导出的 `ModelRuntime`，完成「列供应商 / 登录 / 回答提问 / 取消 / 登出」五件事。**凭据仍由 pi 自己写进它的 `auth.json`**，PiDeck 不碰凭据内容。
+- 边界：这条通道**只允许认证用途**，禁止扩展成通用 pi API 桥（不要拿它去调会话/工具/模型）；渲染层只能经 `pi-auth:*` IPC 访问，不得直接 import pi SDK。
+- 代码归属：pi SDK 入口/node 解析在 `src/main/pi/auth/piAuthHostLaunch.ts`（WSL 下明确不支持，UI 提示改用终端 `/login`）；进程生命周期与 NDJSON 协议在 `src/main/pi/auth/PiAuthService.ts`；助手本体是 `resources/pi-auth-host.mjs`（协议 v1，stdout 只放协议数据，日志走 stderr）。
+- 打包：`resources/pi-auth-host.mjs` 必须列进 `package.json` 的 `extraResources`，漏了打包版会报「应用缺少认证助手文件」。
+
 ## Architecture & Data Flow
 
 Three-process Electron layout with a shared contract layer, plus a `utilityProcess` DSH host and child pi/DSH processes.
@@ -311,3 +319,9 @@ A second job (`pet-linux-smoke`, `ubuntu-latest`) runs `npm run build` then `xvf
 | `storeSuggestionChipContrast.test.mjs` | no `text-<surface token>` in the renderer |
 | `sessionRuntimeTargetBoundaries.test.mjs` | runtime commands carry the `sessionId/agentId/runtimeGeneration` triple |
 | `dshRuntimeIpc.test.mjs` | subscription APIs return unsubscribe |
+
+## 长期重构纪律
+
+- 大重构必须先写对照计划（能力 parity 表 + 合并门禁），计划文档放 `docs/` 并注明状态；落地完成后按本文档的文档纪律收口（更新状态行或删除），不留长期悬空的计划文档。
+- 禁止无对照表的长期分叉分支；main 的用户可感知改动当周回填到进行中重构分支。
+- 重构期间禁止用 `-X theirs`/`-X ours` 静默吞掉对方改动；每个冲突都要确认能力归属。

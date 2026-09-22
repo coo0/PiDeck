@@ -249,3 +249,48 @@ export function saveTerminalHeight(height: number): void {
 		// 配额/隐私模式失败时静默忽略；高度仍在本会话内存中有效
 	}
 }
+
+/**
+ * 各 shell 空闲时 PTY 前台进程名的预期值（node-pty `IPty.process`）。
+ *
+ * 为什么要这张表：主进程只上报「当前前台进程名」，不知道它是「shell 自己在等输入」
+ * 还是「用户跑着 sleep 60」。判定归渲染层，就需要知道每个 shell 空闲时叫什么。
+ * 不同 shell 上报格式不一（可能带 .exe、可能是完整路径），故比较前统一
+ * 取 basename + 小写。
+ */
+export const SHELL_DEFAULT_PROCESS: Record<string, string> = {
+	pwsh: "pwsh",
+	powershell: "powershell",
+	cmd: "cmd",
+	zsh: "zsh",
+	bash: "bash",
+	fish: "fish",
+	sh: "sh",
+	"git-bash": "bash",
+	wsl: "wsl",
+};
+
+/** 取进程名 basename 并小写、去 Windows 可执行后缀：兼容 `C:\Windows\System32\cmd.exe` 与 `/bin/zsh` 两种上报格式。 */
+function normalizeProcessName(value: string | undefined): string {
+	const name = (value ?? "").trim().toLowerCase();
+	if (!name) return "";
+	const base = name.split(/[\\/]/).pop() ?? name;
+	return base.replace(/\.(exe|cmd|bat|com)$/, "");
+}
+
+/**
+ * 关闭终端标签是否需要确认（纯函数，可单测）。
+ *
+ * - never：从不确认（用户明确要求不打断）；
+ * - always：总是确认；
+ * - running：仅「前台进程不是该 shell 自己」时确认。判定刻意宽松——
+ *   node-pty 的 process 在不同 shell/平台格式不一，宁可漏弹（不打断）也不要
+ *   在空闲提示符上误弹；空进程名同样不弹（拿不到证据就不拦）。
+ */
+export function shouldConfirmTerminalClose(mode: "never" | "running" | "always", frontProcess: string | undefined, shell: string): boolean {
+	if (mode === "never") return false;
+	if (mode === "always") return true;
+	const name = normalizeProcessName(frontProcess);
+	if (!name) return false;
+	return name !== normalizeProcessName(SHELL_DEFAULT_PROCESS[shell] ?? shell);
+}

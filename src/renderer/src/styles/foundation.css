@@ -2663,10 +2663,13 @@ select:focus-visible {
   --git-input-bg: transparent;
 }
 /* 壁纸模式终端一体性：dock 容器/header 透出 chat-pane 单层，与输出区同透明度；
-   xterm 背景在 TerminalDock.tsx 中处理（浅色主题透明，深色主题保留面板档 alpha）。 */
+   xterm 背景在 TerminalDock.tsx 中处理（浅色主题透明，深色主题保留面板档 alpha）。
+   --terminal-bg 必须 !important：主题变量改由 TerminalDock 注入 inline style，
+   而 inline 自定义属性优先级高于任何非 important 样式表规则——不加 !important
+   会在壁纸模式下把 .terminal-pane-shell 重新刷成主题底色（白层盖住背景图）。 */
 :root[data-bg-image="on"] .terminal-dock,
 :root[data-bg-image="on"] .terminal-dock-header {
-  --terminal-bg: transparent;
+  --terminal-bg: transparent !important;
   background: transparent;
 }
 /* xterm 容器三层默认叠 var(--terminal-bg)（+!important），壁纸模式下同样透明，
@@ -3268,88 +3271,25 @@ select:focus-visible {
   animation: messageJumpHighlight 2s ease-out;
   border-radius: var(--radius-md);
 }
+/* 终端配色变量（--terminal-*）由 TerminalDock.tsx 从 terminalThemes.ts 单一数据源
+   用 inline style 注入：这里不再按 data-theme 硬编码 5 套变量块（双份定义必然漂移）。
+   var() 的 fallback 只用于「注入前的首帧」，不是第二份主题定义。 */
 .terminal-dock {
-  --terminal-bg: #ffffff;
-  --terminal-fg: #243244;
-  --terminal-panel: #ffffff;
-  --terminal-header: #ffffff;
-  --terminal-border: color-mix(in srgb, var(--color-border-subtle) 55%, transparent);
-  --terminal-muted: #8b8f94;
-  --terminal-active-bg: transparent;
-  --terminal-active-fg: #15803d;
-  --terminal-hover: #f0f1ed;
-  position: relative;
-  z-index: 0;
-  min-height: 120px;
-  border-top: 1px solid var(--terminal-border);
-  background: var(--terminal-panel);
-  color: var(--terminal-fg);
-  display: grid;
-  grid-template-rows: 30px minmax(0, 1fr);
-  box-shadow: 0 -2px 8px -4px var(--terminal-border);
-  z-index: 60;
-  will-change: transform;
-  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+	position: relative;
+	min-height: 120px;
+	border-top: 1px solid var(--terminal-border, var(--color-border-subtle));
+	background: var(--terminal-panel, var(--color-bg-panel));
+	color: var(--terminal-fg, var(--color-text-primary));
+	display: grid;
+	grid-template-rows: 30px minmax(0, 1fr);
+	box-shadow: var(--terminal-shadow, 0 -2px 8px -4px var(--terminal-border, var(--color-border-subtle)));
+	z-index: 60;
+	will-change: transform;
+	transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 .terminal-dock[data-motion-state="hidden"] {
-  transform: translate3d(0, 100%, 0);
-  pointer-events: none;
-}
-.terminal-dock[data-theme="solarized-light"] {
-  --terminal-bg: #fdf6e3;
-  --terminal-fg: #657b83;
-  --terminal-panel: #eee8d5;
-  --terminal-header: #fdf6e3;
-  --terminal-border: color-mix(in srgb, #d9d0ad 55%, transparent);
-  --terminal-muted: #6c7780;
-  --terminal-active-bg: #e6f2d7;
-  --terminal-active-fg: #586e00;
-  --terminal-hover: #e8dfc3;
-}
-:root[data-theme="dark"] .terminal-dock[data-theme="pi-soft"] {
-  --terminal-bg: #15191d;
-  --terminal-fg: #d9e2dc;
-  --terminal-panel: #1b2025;
-  --terminal-header: #22282e;
-  --terminal-border: color-mix(in srgb, #2a333a 55%, transparent);
-  --terminal-muted: #95a39c;
-  --terminal-active-bg: transparent;
-  --terminal-active-fg: #6ee78c;
-  --terminal-hover: #263039;
-  box-shadow: none;
-}
-.terminal-dock[data-theme="solarized-dark"] {
-  --terminal-bg: #002b36;
-  --terminal-fg: #839496;
-  --terminal-panel: #073642;
-  --terminal-header: #073642;
-  --terminal-border: #164b59;
-  --terminal-muted: #93a1a1;
-  --terminal-active-bg: #114b58;
-  --terminal-active-fg: #2aa198;
-  --terminal-hover: #0f4652;
-}
-.terminal-dock[data-theme="one-dark"] {
-  --terminal-bg: #282c34;
-  --terminal-fg: #abb2bf;
-  --terminal-panel: #21252b;
-  --terminal-header: #282c34;
-  --terminal-border: #3a3f4b;
-  --terminal-muted: #9aa3b4;
-  --terminal-active-bg: #343b46;
-  --terminal-active-fg: #98c379;
-  --terminal-hover: #303640;
-}
-.terminal-dock[data-theme="monokai"] {
-  --terminal-bg: #272822;
-  --terminal-fg: #f8f8f2;
-  --terminal-panel: #20211c;
-  --terminal-header: #272822;
-  --terminal-border: #3e3d32;
-  --terminal-muted: #cfcfc2;
-  --terminal-active-bg: #3a3b31;
-  --terminal-active-fg: #a6e22e;
-  --terminal-hover: #33342c;
+	transform: translate3d(0, 100%, 0);
+	pointer-events: none;
 }
 .terminal-dock.collapsed {
   min-height: 30px;

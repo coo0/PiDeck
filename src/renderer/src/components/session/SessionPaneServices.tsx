@@ -3,6 +3,8 @@ import type { AgentTab, AgentUiResponse, ChatMessage, GitBranchInfo, ImageConten
 import type { QueuedPrompt } from "../../hooks/useQueuedPrompt";
 import type { NoticeId, NoticeKind } from "../../utils/notice";
 import type { TerminalDockStateByOwner } from "../../terminalDockState";
+import type { TerminalDockSettings } from "../terminal/TerminalDock";
+import type { TerminalThemeId } from "../../../../shared/types/settings";
 
 /** 打开会话文件时由栏级 injector 绑定的解析与授权上下文。 */
 export type SessionFileOpenContext = {
@@ -61,6 +63,10 @@ export type SessionPaneServices = {
 	validCommandNames: Set<string>;
 	validFilePaths: Set<string>;
 	terminalStatesByOwner: TerminalDockStateByOwner;
+	/** 终端外观设置（来自 AppSettings；设置变更即生效，TerminalDock 内的热更新 effect 消费） */
+	terminalSettings: TerminalDockSettings;
+	/** 终端更多菜单里切换主题：写回 AppSettings（终端配色的单一数据源在设置里） */
+	setTerminalTheme: (themeId: TerminalThemeId) => void;
 	availableTerminalHeight: number;
 	/** App 级激活 owner 键（agent:<id> / project:<id>）：分屏去重参照 + 大纲按钮状态） */
 	activeTerminalOwnerKey?: string;

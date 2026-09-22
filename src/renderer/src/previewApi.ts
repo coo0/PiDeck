@@ -178,6 +178,17 @@ let previewSettings: AppSettings = {
 	fontFamilyBaseCustom: "",
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
+	// 终端设置：与主进程 defaultSettings 保持一致，预览壳仅保持设置项形状完整
+	terminalTheme: "inherit",
+	terminalFontSize: null,
+	terminalFontFamily: "",
+	terminalScrollback: 5000,
+	terminalCursorStyle: "block",
+	terminalCursorBlink: true,
+	terminalCopyOnSelect: false,
+	terminalPaddingY: 8,
+	terminalConfirmClose: "running",
+	terminalStartupCommand: "",
 	removedBuiltInExtensions: [],
 	// 与主进程 defaultSettings 保持一致（预览壳不真实播放，仅保持设置项形状完整）
 	soundAlert: createDefaultSoundAlertSettings(),
@@ -1518,6 +1529,8 @@ export function createPreviewApi(): PiDesktopApi {
 				{ shell: "pwsh", label: "pwsh", available: true },
 				{ shell: "cmd", label: "cmd", available: true },
 			],
+			// 预览壳没有主进程字体枚举：给一组常见等宽字体作为可选值
+			fonts: async () => ["Cascadia Mono", "Consolas", "JetBrains Mono", "Menlo", "Monaco", "SF Mono"],
 		},
 		feishu: {
 			connect: async () => ({ success: true, message: "预览模式" }),

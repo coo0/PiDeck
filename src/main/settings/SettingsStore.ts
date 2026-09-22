@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
-import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, normalizeSoundAlertSettings, type AppSettings } from "../../shared/types";
+import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, normalizeSoundAlertSettings, type AppSettings, type TerminalConfirmCloseMode, type TerminalCursorStyle, type TerminalThemeId } from "../../shared/types";
 import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
@@ -261,7 +261,45 @@ Gitmoji 对应关系：
 	fontFamilyBaseCustom: "",
 	fontFamilyMono: "system-mono",
 	fontFamilyMonoCustom: "",
+
+	// 终端外观/行为默认值：主题 inherit 保持现有 pi-soft 跟随明暗行为，
+	// scrollback 与 TerminalDock 原硬编码 5000 一致（升级后行为不变）。
+	terminalTheme: "inherit",
+	terminalFontSize: null,
+	terminalFontFamily: "",
+	terminalScrollback: 5000,
+	terminalCursorStyle: "block",
+	terminalCursorBlink: true,
+	terminalCopyOnSelect: false,
+	terminalPaddingY: 8,
+	terminalConfirmClose: "running",
+	terminalStartupCommand: "",
 };
+
+const TERMINAL_THEME_IDS: readonly string[] = ["inherit", "solarized-light", "solarized-dark", "one-dark", "monokai"];
+const TERMINAL_CURSOR_STYLES: readonly string[] = ["block", "bar", "underline"];
+const TERMINAL_CONFIRM_CLOSE_MODES: readonly string[] = ["never", "running", "always"];
+
+/** 数值设置回落：非有限数用 fallback，否则 clamp 到 [min,max] 并取整。 */
+export function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+	return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+/** 终端主题 id 白名单回落：脏数据（旧 JSON 任意字符串）一律回 inherit。 */
+export function parseTerminalTheme(value: unknown): TerminalThemeId {
+	return TERMINAL_THEME_IDS.includes(value as string) ? (value as TerminalThemeId) : defaultSettings.terminalTheme;
+}
+
+/** 终端光标形状白名单回落。 */
+export function parseTerminalCursorStyle(value: unknown): TerminalCursorStyle {
+	return TERMINAL_CURSOR_STYLES.includes(value as string) ? (value as TerminalCursorStyle) : defaultSettings.terminalCursorStyle;
+}
+
+/** 关闭确认策略白名单回落。 */
+export function parseTerminalConfirmClose(value: unknown): TerminalConfirmCloseMode {
+	return TERMINAL_CONFIRM_CLOSE_MODES.includes(value as string) ? (value as TerminalConfirmCloseMode) : defaultSettings.terminalConfirmClose;
+}
 
 /**
  * updateSource 一次性迁移（v0.7.5 默认源 github → atomgit）：
@@ -328,6 +366,23 @@ export class SettingsStore {
 			if (persistedMonoFont === "commit-mono") {
 				this.settings.fontFamilyMono = "system-mono";
 			}
+			// 终端设置来自旧 JSON 时可能缺字段或脏值（未知主题 id / 非数字字号 / 越界滚动行数）；
+			// 统一归一化，避免 xterm 拿到非法选项或设置页显示坏值。
+			this.settings.terminalTheme = parseTerminalTheme(this.settings.terminalTheme);
+			this.settings.terminalCursorStyle = parseTerminalCursorStyle(this.settings.terminalCursorStyle);
+			this.settings.terminalConfirmClose = parseTerminalConfirmClose(this.settings.terminalConfirmClose);
+			this.settings.terminalScrollback = clampNumber(this.settings.terminalScrollback, 0, 200_000, defaultSettings.terminalScrollback);
+			this.settings.terminalPaddingY = clampNumber(this.settings.terminalPaddingY, 0, 32, defaultSettings.terminalPaddingY);
+			// null 是合法值（跟随 UI 字号档），只在非法类型时回落
+			if (this.settings.terminalFontSize !== null && typeof this.settings.terminalFontSize !== "number") {
+				this.settings.terminalFontSize = defaultSettings.terminalFontSize;
+			} else if (typeof this.settings.terminalFontSize === "number") {
+				this.settings.terminalFontSize = Math.min(32, Math.max(6, Math.round(this.settings.terminalFontSize)));
+			}
+			if (typeof this.settings.terminalFontFamily !== "string") this.settings.terminalFontFamily = "";
+			if (typeof this.settings.terminalStartupCommand !== "string") this.settings.terminalStartupCommand = "";
+			if (typeof this.settings.terminalCursorBlink !== "boolean") this.settings.terminalCursorBlink = defaultSettings.terminalCursorBlink;
+			if (typeof this.settings.terminalCopyOnSelect !== "boolean") this.settings.terminalCopyOnSelect = defaultSettings.terminalCopyOnSelect;
 			// 兼容迁移：更新源默认 github → atomgit（一次性，写标记后尊重用户显式选择）。
 			if (migrateUpdateSourceToAtomgit(this.settings)) {
 				// 迁移后立即落盘：防止后续任一次保存把未迁移状态写回（与宽度迁移同策略）
@@ -547,6 +602,38 @@ export class SettingsStore {
 		// 声音提醒来自渲染层，入参不可信：缺字段/非法引用/越界音量一律回落默认。
 		if ("soundAlert" in safePatch) {
 			safePatch.soundAlert = normalizeSoundAlertSettings(safePatch.soundAlert);
+		}
+		// 终端设置来自渲染层（设置页表单），入参不可信：非法枚举/越界数值一律回落默认，
+		// 否则 xterm 会拿到非法选项（滚动行数负数、字号 NaN 等）。
+		if ("terminalTheme" in safePatch) {
+			safePatch.terminalTheme = parseTerminalTheme(safePatch.terminalTheme);
+		}
+		if ("terminalCursorStyle" in safePatch) {
+			safePatch.terminalCursorStyle = parseTerminalCursorStyle(safePatch.terminalCursorStyle);
+		}
+		if ("terminalConfirmClose" in safePatch) {
+			safePatch.terminalConfirmClose = parseTerminalConfirmClose(safePatch.terminalConfirmClose);
+		}
+		if ("terminalScrollback" in safePatch) {
+			safePatch.terminalScrollback = clampNumber(safePatch.terminalScrollback, 0, 200_000, defaultSettings.terminalScrollback);
+		}
+		if ("terminalPaddingY" in safePatch) {
+			safePatch.terminalPaddingY = clampNumber(safePatch.terminalPaddingY, 0, 32, defaultSettings.terminalPaddingY);
+		}
+		if ("terminalFontSize" in safePatch && safePatch.terminalFontSize !== null) {
+			safePatch.terminalFontSize = clampNumber(safePatch.terminalFontSize, 6, 32, defaultSettings.terminalFontSize ?? 13);
+		}
+		if ("terminalFontFamily" in safePatch && typeof safePatch.terminalFontFamily !== "string") {
+			delete safePatch.terminalFontFamily;
+		}
+		if ("terminalStartupCommand" in safePatch && typeof safePatch.terminalStartupCommand !== "string") {
+			delete safePatch.terminalStartupCommand;
+		}
+		if ("terminalCursorBlink" in safePatch && typeof safePatch.terminalCursorBlink !== "boolean") {
+			delete safePatch.terminalCursorBlink;
+		}
+		if ("terminalCopyOnSelect" in safePatch && typeof safePatch.terminalCopyOnSelect !== "boolean") {
+			delete safePatch.terminalCopyOnSelect;
 		}
 		// 闲置 agent 释放参数来自渲染层，钳制到合理范围避免非法值（0/负数/超大）写入磁盘
 		if ("idleAgentKeepCount" in safePatch) {

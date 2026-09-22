@@ -322,6 +322,8 @@ export function SessionView({
 						height={terminalRowHeight}
 						maxHeight={availableTerminalHeight}
 						terminal={api.terminal}
+						terminalSettings={paneServices.terminalSettings}
+						onThemeChange={paneServices.setTerminalTheme}
 						ownerKey={terminalOwnerKey}
 						isProgrammaticResize={() => Date.now() < terminalProgrammaticExpireRef.current}
 						onOpenChange={setTerminalOpenForOwner}

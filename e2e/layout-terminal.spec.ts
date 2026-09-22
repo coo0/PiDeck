@@ -35,9 +35,11 @@ test("layout: terminal dock open/shell/collapse", async ({ window }) => {
 	// 菜单开合属于纯渲染层状态机，用 dispatchEvent 直发规避画布层遮挡。
 	const shellTrigger = dock.getByTitle("选择 Shell");
 	await shellTrigger.dispatchEvent("click");
-	await expect(dock.locator(".terminal-shell-menu")).toBeVisible({ timeout: 5000 });
+	// Popover 内容是 Radix Portal（data-slot="popover-content"），不在 dock 子树内，
+	// 按文案断言：标题「选择 Shell」。旧的 .terminal-shell-menu 选择器全仓不存在（死断言）。
+	await expect(window.getByText("选择 Shell").first()).toBeVisible({ timeout: 5000 });
 	await shellTrigger.dispatchEvent("click");
-	await expect(dock.locator(".terminal-shell-menu")).toBeHidden({ timeout: 3000 });
+	await expect(window.getByText("选择 Shell").first()).toBeHidden({ timeout: 3000 });
 
 	// 折叠 dock：「收起终端」按钮 → collapsed 类出现
 	await dock.getByTitle("收起终端").dispatchEvent("click");

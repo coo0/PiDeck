@@ -142,3 +142,19 @@ export function formatPercent(value: number): string {
 	if (value >= 1) return String(Math.round(value * 10) / 10);
 	return String(Math.round(value * 100) / 100);
 }
+
+/**
+ * 缓存命中率展示（与 pi CLI footer 的 `CH{n}%` 同精度：固定一位小数）。
+ *
+ * 为什么不能用 `Math.round`：命中率在长会话里普遍落在 99.5%~99.98%，
+ * 四舍五入会把大量「接近但不等于 100%」的值显示成 100%，用户会以为缓存全命中、
+ * 增量输入没计费（2026-09 反馈）。pi 官方 footer 用 `toFixed(1)`，
+ * 99.89% 显示为 99.9%，既不丢信息也不谎报满分。
+ *
+ * 边界：非有限值（NaN/Infinity）不展示（返回 undefined 由调用方跳过）。
+ * 真实 100% 仍显示 100.0%，不特殊处理。
+ */
+export function formatCacheHitPercent(value: number | null | undefined): string | undefined {
+	if (value == null || !Number.isFinite(value)) return undefined;
+	return `${value.toFixed(1)}%`;
+}

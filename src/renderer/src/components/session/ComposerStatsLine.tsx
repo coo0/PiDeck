@@ -1,7 +1,7 @@
 import { Fragment, memo, useLayoutEffect, useRef, useState } from "react";
 import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
-import { formatDuration } from "./TimelineFormat";
+import { formatDuration, formatCacheHitPercent } from "./TimelineFormat";
 import { formatTokens } from "./SessionContextMeter";
 import { ProviderUsageInline } from "../app/ProviderUsageInline";
 import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
@@ -66,8 +66,10 @@ export function buildComposerStatsGroups(state: Pick<AgentRuntimeState, "dshSess
 	const input = state.inputTokens ?? 0;
 	const output = state.outputTokens ?? 0;
 	if (input > 0 || output > 0) {
-		if (state.cacheHitPercent != null) {
-			groups.push(t("composerStats.cacheHit", { percent: Math.round(state.cacheHitPercent) }));
+		const hit = formatCacheHitPercent(state.cacheHitPercent);
+		if (hit != null) {
+			// i18n 模板已自带 `%`（`缓存命中 {percent}%`），这里只传数值，避免出现 `88.2%%`。
+			groups.push(t("composerStats.cacheHit", { percent: hit.replace(/%$/, "") }));
 		}
 		groups.push(
 			t("composerStats.tokens", {

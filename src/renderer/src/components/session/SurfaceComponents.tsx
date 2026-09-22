@@ -135,7 +135,7 @@ import type { BubbleRefSegment } from "./composer/quoteChip";
 import removeMarkdown from "remove-markdown";
 
 import type { WorkspaceDrawerPanel } from "../../hooks/useWorkspacePanels";
-import { formatDuration, formatTime, stripAnsi, formatPercent } from "./TimelineFormat";
+import { formatDuration, formatTime, stripAnsi, formatPercent, formatCacheHitPercent } from "./TimelineFormat";
 import { extractVisionBridgeBlocks, matchVisionBridgeEvent } from "../../utils/visionBridgeBlocks";
 import { visionImageHashes } from "../../utils/visionImageHash";
 import { ToolCard, ToolGroupCard, type DiffFileHandler } from "./ToolCallComponents";
@@ -228,16 +228,22 @@ export function buildSessionStatusDetail(
 		});
 	}
 	if (state.cacheHitPercent != null) {
-		detailRows.push({
-			label: t("ctx.detail.hitLatest"),
-			value: `${state.cacheHitPercent.toFixed(1)}%`,
-		});
+		const latest = formatCacheHitPercent(state.cacheHitPercent);
+		if (latest != null) {
+			detailRows.push({
+				label: t("ctx.detail.hitLatest"),
+				value: latest,
+			});
+		}
 	}
 	if (averageCacheHit != null) {
-		detailRows.push({
-			label: t("ctx.detail.hitAverage"),
-			value: `${averageCacheHit.toFixed(1)}% (${averageCacheHitSampleCount} ${t("ctx.detail.snapshots")})`,
-		});
+		const average = formatCacheHitPercent(averageCacheHit);
+		if (average != null) {
+			detailRows.push({
+				label: t("ctx.detail.hitAverage"),
+				value: `${average} (${averageCacheHitSampleCount} ${t("ctx.detail.snapshots")})`,
+			});
+		}
 	}
 	// 这些值来自 AgentManager 的 lastPerfByAgent，只代表最近一条 assistant 回复，
 	// 不能和上下文累计量混在同一组，否则用户会误以为是整段会话的平均性能。
@@ -296,6 +302,9 @@ export function SessionStatus(props: {
 	const history = props.cacheHitHistory ?? [];
 	const averageCacheHit = state.cacheHitAveragePercent ?? (history.length > 0 ? history.reduce((sum, value) => sum + value, 0) / history.length : undefined);
 	const averageCacheHitSampleCount = state.cacheHitSampleCount ?? history.length;
+	// 头部 cache-chip 与明细行同源同精度（toFixed(1)）：旧实现用 toFixed(0)，
+	// 99.89% 会被显示成 100%（2026-09 反馈）。
+	const cacheHitChipText = formatCacheHitPercent(state.cacheHitPercent);
 	const { detailRows, replyPerfRows, sessionStatRows, hasDetail } = buildSessionStatusDetail(state, averageCacheHit, averageCacheHitSampleCount);
 	// cost-chip 悬浮提示里的人民币估算（与明细行共用同一汇率常量）
 	const cnyAmount = state.cost != null ? `¥${(state.cost * USD_TO_CNY_RATE).toFixed(2)}` : undefined;
@@ -307,9 +316,9 @@ export function SessionStatus(props: {
 					{t("app.ctx")}: {formatPercent(state.contextPercent)}% / {formatCompact(state.contextWindow)}
 				</span>
 			)}
-			{state.cacheHitPercent != null && (
+			{cacheHitChipText != null && (
 				<span className="cache-chip">
-					{t("app.cacheHit")}: {state.cacheHitPercent?.toFixed?.(0) ?? state.cacheHitPercent}%
+					{t("app.cacheHit")}: {cacheHitChipText}
 				</span>
 			)}
 			{/* 平均命中率只在悬停明细中展示（ctx.detail.hitAverage），头部不再显示单独 chip */}

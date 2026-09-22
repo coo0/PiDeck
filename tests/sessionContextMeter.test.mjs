@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
-import { formatPercent } from "../src/renderer/src/components/session/TimelineFormat.ts";
+import { formatPercent, formatCacheHitPercent } from "../src/renderer/src/components/session/TimelineFormat.ts";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 // 与 sessionWidgetChips.test.mjs 相同的 TSX 编译替身模式：只测公开 helper 与源码结构。
@@ -102,6 +102,43 @@ test("formatPercent keeps sub-percent precision for small context usage", () => 
 	assert.equal(formatPercent(45), "45");
 	assert.equal(formatPercent(45.3), "45");
 	assert.equal(formatPercent(100), "100");
+});
+
+/**
+ * 2026-09 回归：输入框下方指标条的「缓存命中 100%」谎报满分。
+ *
+ * 实测会话 `2026-09-21T03-39-48-436Z_*.jsonl`（623 条 assistant 样本）：
+ * 长会话命中率普遍落在 99.5%~99.98%，`Math.round` 把其中 **427 条**显示成 100%，
+ * 而实际均 <100%（最新一条 input=646 / cacheRead=575360 = 99.8878%）。
+ * pi CLI footer 的 `CH{n}%` 用 toFixed(1)，对应显示 99.9%。
+ */
+test("formatCacheHitPercent keeps one decimal like pi CLI footer (no false 100%)", () => {
+	// 核心回归：99.8878% 不得显示成 100%
+	assert.equal(formatCacheHitPercent(99.8878), "99.9%");
+	assert.equal(formatCacheHitPercent(99.502), "99.5%");
+	// 与 pi footer 同精度：真实 100% 仍显示 100.0%（不特殊处理）
+	assert.equal(formatCacheHitPercent(100), "100.0%");
+	assert.equal(formatCacheHitPercent(0), "0.0%");
+	assert.equal(formatCacheHitPercent(87.98), "88.0%");
+	// 边界：非有限值不展示（调用方跳过渲染）
+	assert.equal(formatCacheHitPercent(null), undefined);
+	assert.equal(formatCacheHitPercent(undefined), undefined);
+	assert.equal(formatCacheHitPercent(Number.NaN), undefined);
+	assert.equal(formatCacheHitPercent(Number.POSITIVE_INFINITY), undefined);
+});
+
+test("cache-hit display sites share one formatter (no Math.round / toFixed(0) drift)", () => {
+	const statsLine = readFileSync("src/renderer/src/components/session/ComposerStatsLine.tsx", "utf8");
+	const surfaces = readFileSync("src/renderer/src/components/session/SurfaceComponents.tsx", "utf8");
+
+	// 三处（指标条 / 会话头部 chip / 悬停明细）必须都用共享 formatter
+	assert.match(statsLine, /formatCacheHitPercent\(state\.cacheHitPercent\)/);
+	assert.match(surfaces, /formatCacheHitPercent\(state\.cacheHitPercent\)/);
+	assert.match(surfaces, /formatCacheHitPercent\(averageCacheHit\)/);
+	// 旧的会谎报满分的写法必须彻底消失
+	assert.doesNotMatch(statsLine, /Math\.round\(state\.cacheHitPercent\)/);
+	assert.doesNotMatch(surfaces, /cacheHitPercent\??\.toFixed\?\.\(0\)/);
+	assert.doesNotMatch(surfaces, /\$\{state\.cacheHitPercent\.toFixed\(1\)\}%/);
 });
 
 test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-start fill", () => {

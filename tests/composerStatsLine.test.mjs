@@ -49,7 +49,7 @@ function loadStats() {
 				return (table[key] ?? key).replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? ""));
 			},
 		},
-		"./TimelineFormat": { formatDuration: (ms) => `${ms}ms` },
+		"./TimelineFormat": { formatDuration: (ms) => `${ms}ms`, formatCacheHitPercent: (v) => (v == null || !Number.isFinite(v) ? undefined : `${v.toFixed(1)}%`) },
 		"./SessionContextMeter": { formatTokens: (n) => String(n) },
 	});
 }
@@ -72,7 +72,9 @@ test("dsh sessionStats fills counts, durations, speeds, then tokens", () => {
 	assert.equal(groups[0], "3 轮 · 7 步");
 	assert.equal(groups[1], "LLM 2500ms · 工具调用 800ms");
 	assert.equal(groups[2], "首 token 平均 120ms · 42 tok/s");
-	assert.equal(groups[3], "缓存命中 88%");
+	// 缓存命中率保留一位小数（与 pi CLI footer 同精度）：88.2 不再被四舍五入成 88%，
+	// 也避免 99.9% 被显示成谎报满分的 100%（2026-09 回归）。
+	assert.equal(groups[3], "缓存命中 88.2%");
 	assert.equal(groups[4], "输入 1200 tok · 输出 340 tok");
 });
 

@@ -159,6 +159,39 @@ test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-
 	assert.match(source, /addEventListener\("keydown", onKeyDown\)/);
 });
 
+test("meter ring colors encode state via ctx semantic tokens (no second palette)", () => {
+	const source = meterSource();
+	// 分档与双色都来自纯函数（utils/contextSpend），组件不内联色值：
+	// 颜色即状态 = normal 蓝紫 / 预警黄橙 / 危险橙红。
+	assert.match(source, /contextRingLevelFromUsed\(context\?\.percent \?\? 0\)/);
+	assert.match(source, /contextRingColorVars\(ringLevel\)/);
+	// 环底用 --ctx-track，环身用渐变（stop 引用 contextRingColorVars 的 a/b）
+	assert.match(source, /stroke="var\(--ctx-track\)"/);
+	assert.match(source, /stopColor=\{ringColors\.a\}/);
+	assert.match(source, /stopColor=\{ringColors\.b\}/);
+	// 旧的灰色描边（border/tertiary）彻底消失——灰环在白/深底上都接近背景，读不出状态
+	assert.doesNotMatch(source, /stroke-\[var\(--color-border\)\]/);
+	assert.doesNotMatch(source, /stroke-\[var\(--color-text-tertiary\)\]/);
+	// 同页多个圆环（分屏）的渐变 id 必须唯一，否则互相覆盖
+	assert.match(source, /const ringGradientId = `ctx-ring-\$\{useId\(\)\.replace\(/);
+});
+
+test("meter mounts the serial spend animation from the shared hook", () => {
+	const source = meterSource();
+	// 扣血动画：数据/队列/去重都在 hook 里，组件只负责渲染与 animationend 推进
+	assert.match(source, /import \{ useContextSpendEffects \} from "\.\.\/\.\.\/hooks\/useContextSpendEffects"/);
+	assert.match(source, /useContextSpendEffects\(\{ sessionId: props\.sessionId, tokens: props\.state\?\.contextTokens \}\)/);
+	assert.match(source, /data-testid="session-context-spend"/);
+	assert.match(source, /animate-context-hit/);
+	assert.match(source, /onAnimationEnd=\{spend\.onSpendAnimationEnd\}/);
+	// 圆环同步 pulse（620ms）：让「扣血」有主体，而不是只有一条飞过的数字
+	assert.match(source, /animate-context-pulse/);
+	// key=pulseKey：同一标签连续两次也要重挂元素重启动画
+	assert.match(source, /key=\{spend\.pulseKey\}/);
+	// 扣血元素不可拦截指针（圆环按钮仍可点）
+	assert.match(source, /pointer-events-none absolute top-1\/2 right-full/);
+});
+
 test("contextSegments prefers host breakdown and falls back to estimate split", () => {
 	const { contextSegments } = loadMeterHelpers();
 	const seg = (state) => {
@@ -286,23 +319,56 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
 	const source = bottomBarSource();
 	// ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
 	assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-	assert.match(source, /<SessionContextMeter\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*backend=\{usageBackend\}\s*\/\/ [^\n]+\n\s*fallbackProvider=\{modelProvider\}/);
+	assert.match(source, /<SessionContextMeter\s*sessionId=\{props\.sessionId\}\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*backend=\{usageBackend\}[\s\S]{0,200}?fallbackProvider=\{modelProvider\}/);
 	assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
-	// 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态）
+	// 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态，保持原样）
 	assert.match(source, /composer-bar-btn model-thinking/);
 	// 分隔点 span 内的 · 被格式化到独立一行，断言只要求「模型值后紧跟该分隔点 span」。
 	assert.match(source, /\{modelValue\}<\/span>[\s\S]{0,80}?<span className="flex-none text-muted-foreground\/70" aria-hidden="true">[\s\S]{0,10}?·[\s\S]{0,10}?<\/span>/);
 	assert.match(source, /<ChevronDown\s*size=\{12\}/);
 	assert.match(source, /rotate-180/);
-	// root 菜单两行 drill-in：模型/思考 + 当前值 + 右 chevron，点击复用既有 Dialog
-	assert.match(source, /t\("app\.model"\)/);
-	assert.match(source, /t\("app\.think"\)/);
-	assert.match(source, /<ChevronRight size=\{14\}/);
-	assert.match(source, /drillIn\(props\.onPickModel\)/);
-	assert.match(source, /drillIn\(props\.onPickThinking\)/);
+	// 旧的「两行 drill-in 菜单」（模型 / 思考 + ChevronRight）已整体移除：
+	// 点 chip 现在直接弹一级浮层（pill + 滑块），点 pill 进二级模型列表。
+	assert.doesNotMatch(source, /drillIn\(props\.onPickModel\)/);
+	assert.doesNotMatch(source, /drillIn\(props\.onPickThinking\)/);
+	assert.match(source, /<ModelEffortPopover/);
+	assert.match(source, /<ModelPickerBody/);
 	// 旧的分离按钮（绿色思考、斜体模型）不再存在
 	assert.doesNotMatch(source, /composer-bar-btn model flex h-7/);
 	assert.doesNotMatch(source, /composer-bar-btn thinking h-7 max-w-\[10rem\]/);
+});
+
+test("composer chip popover: two levels share one container, effort colors the pill text only", () => {
+	const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
+	const popover = readFileSync("src/renderer/src/components/session/ModelEffortPopover.tsx", "utf8");
+	const slider = readFileSync("src/renderer/src/components/session/EffortSlider.tsx", "utf8");
+	// 两级共用一个容器：data-view 切换 + width/left 同步过渡 220ms（原型定稿值）
+	assert.match(popover, /data-view=\{props\.view\}/);
+	assert.match(popover, /transition-\[width,left\] duration-\[220ms\] ease-out-quint/);
+	assert.match(popover, /const MODELS_WIDTH = 452/);
+	assert.match(popover, /const EFFORT_MIN_WIDTH = 230/);
+	assert.match(popover, /const EFFORT_MAX_WIDTH = 430/);
+	// 状态机事件而不是散落的 setState：转移表在 utils/modelEffortPopover 单测
+	assert.match(popover, /onViewEvent\(\{ kind: "toModels" \}\)/);
+	assert.match(popover, /onViewEvent\(\{ kind: "pickModel" \}\)/);
+	assert.match(popover, /onViewEvent\(\{ kind: "escape" \}\)/);
+	assert.match(popover, /onViewEvent\(\{ kind: "outside" \}\)/);
+	// ★ 档位名固定宽度 46px：否则拖动改档位 → pill 变宽 → 浮层重量宽度 → 轨道漂移
+	assert.match(popover, /min-w-\[46px\]/);
+	// ★ 宽度只在模型变化时重算：effect 依赖里是 modelKey 而不是 currentEffort
+	assert.match(popover, /\[open, props\.view, modelKey, place\]/);
+	// 定位：按 chip 居中并在视口边界内钳制；上方空间不足时翻转
+	assert.match(popover, /const min = EDGE_GAP - anchorRect\.left/);
+	assert.match(popover, /setFlipDown\(anchorRect\.top - ANCHOR_GAP/);
+	// 滑块固定蓝色：档位色只作用于 pill 文字（effortColorVar）
+	assert.match(slider, /var\(--color-info\)/);
+	assert.doesNotMatch(slider, /effortColorVar/);
+	assert.match(components, /effortColorVar\(props\.currentEffort\)/);
+	// ★ setPointerCapture 要 try/catch（无活动指针时抛 NotFoundError 会打断 apply）
+	assert.match(slider, /try \{[\s\S]{0,120}?setPointerCapture\(event\.pointerId\)/);
+	assert.match(slider, /\} catch \{/);
+	// 键盘：←/→/Home/End 走纯函数映射
+	assert.match(slider, /effortIndexForKey\(event\.key, index, count\)/);
 });
 
 test("context meter copy is present in both locale dictionaries", () => {
@@ -349,7 +415,8 @@ test("usage block is delegated to the shared ProviderUsageDetails with settings 
 });
 
 test("picker shows usage inline on the provider group row; provider config pages keep the header badge", () => {
-	const picker = bottomBarSource();
+	// 用量单值位随列表主体抽到 ModelPickerBody（Dialog 与底栏二级浮层共用一份）。
+	const picker = readFileSync("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
 	// 用量回到「模型提供商」标题行右侧（trailing inline 单值位）：无数据/未启用时不渲染，
 	// 所以标题行保持干净；backend 随会话后端透传（DSH 会话走 dsh 链路，不误查 pi 的 usage-probes.json）。
 	assert.match(picker, /trailing=\{<ProviderUsageInline provider=\{provider\} variant="row" backend=\{props\.backend\} \/>\}/);
@@ -498,4 +565,19 @@ test("usage provider falls back to session/default model so idle sessions can st
 	assert.match(meterSource, /const provider = props\.state\?\.provider\?\.trim\(\) \|\| props\.fallbackProvider\?\.trim\(\) \|\| undefined;/);
 	// 用量查询不依赖 agent 运行（注释里明示设计意图）
 	assert.match(meterSource, /用量查询不依赖 agent 运行/);
+});
+
+test("effort popover resolves the displayed level when the current one is unsupported (§1.8)", () => {
+	const popover = readFileSync("src/renderer/src/components/session/ModelEffortPopover.tsx", "utf8");
+	// 当前档位不在新模型集合内时，滑块不能用 indexOf=-1 把圆钮钉在首档而 pill 仍显示旧档位：
+	// 展示层先做兜底（resolveEffortAfterModelChange + defaultEffortFallback）。
+	assert.match(popover, /const displayEffort = levelValues\.length === 0 \? \(props\.currentEffort \?\? ""\) : resolveEffortAfterModelChange\(/);
+	assert.match(popover, /fallback: defaultEffortFallback\(levelValues\)/);
+	// EffortView 消费的是兜底后的值（不是 props.currentEffort 原值）
+	assert.match(popover, /effort=\{displayEffort\}/);
+	assert.match(popover, /effortText=\{displayEffortText\}/);
+	// 刻意不发第二条 setRuntimeThinking：后端换模型时已按目标模型 defaultEffort 重选档位，
+	// 前端再发会与它竞争（DSH selectModelWithCatalogEffort 明确不沿用旧档位）。
+	// 断言写成「不得出现调用」的形式，避免命中上面注释里的说明文字。
+	assert.doesNotMatch(popover, /await\s+applyThinking|desktopApi\.sessions\.setRuntimeThinking/);
 });

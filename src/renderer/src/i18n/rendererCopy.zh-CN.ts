@@ -619,6 +619,17 @@ export const zhCN = {
 	"app.modelPickerEmpty": "没有匹配的模型",
 	"app.modelPickerSearch": "搜索模型、供应商或 ID",
 	"app.modelPickerTitle": "选择模型",
+	// 底栏模型 chip 的两级浮层（一级：档位 pill + 滑块；二级：选择模型列表）
+	"composerEffort.modelsTitle": "选择模型",
+	"composerEffort.searchPlaceholder": "搜索模型、供应商或 ID",
+	"composerEffort.favorites": "收藏",
+	"composerEffort.balance": "余额",
+	"composerEffort.expandAll": "展开全部",
+	"composerEffort.collapseAll": "折叠全部",
+	"composerEffort.modelCount": "{count} 模型",
+	"composerEffort.effortLabel": "思考强度",
+	// 上下文消耗扣血动画（-N tok 从圆环向左飞出）；{tokens} 已含千分位
+	"composerEffort.spendTokens": "-{tokens} tok",
 	"app.modelPickerRefresh": "刷新模型列表",
 	"app.modelPickerRefreshing": "正在刷新…",
 	"app.modelPickerRetry": "刷新重试",

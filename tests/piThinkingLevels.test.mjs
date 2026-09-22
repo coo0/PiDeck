@@ -18,6 +18,8 @@ const [stateSource, controllerSource, pickerHostSource, ipcSource, sessionIpcSou
 	readFile("src/preload/index.ts", "utf8"),
 	readFile("src/renderer/src/components/session/ComposerComponents.tsx", "utf8"),
 ]);
+/** 列表主体（Dialog 与底栏二级浮层共用）：loading/主体状态判定住在这里。 */
+const modelPickerBodySource = await readFile("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
 const pickerSource = [stateSource, controllerSource].join("\n");
 
 test("Pi thinking RPC parses and de-duplicates authoritative levels", () => {
@@ -99,10 +101,12 @@ test("DSH missing reasoning metadata falls back to selectable full levels", () =
 	assert.match(pickerSource, /resolveThinkingPickerLevels\(/);
 	// 弹窗 loading 现在只反映「模型目录首屏加载」（catalogLoading → ModelPicker.loading），
 	// 与思考档位探测解耦：探测仍只在 idle 且无缓存时后台进行，不会把面板卡成 loading。
+	// 列表主体已抽到 ModelPickerBody（Dialog 与底栏二级浮层共用一份），
+	// loading/主体状态判定随之住在那里。
 	assert.match(pickerHostSource, /loading=\{preference\.catalogLoading\}/);
-	assert.match(componentsSource, /loading\?: boolean/);
-	assert.match(componentsSource, /resolveModelPickerBody\(\{/);
-	assert.match(componentsSource, /loading: props\.loading,/);
+	assert.match(modelPickerBodySource, /loading\?: boolean/);
+	assert.match(modelPickerBodySource, /resolveModelPickerBody\(\{/);
+	assert.match(modelPickerBodySource, /loading: source\.loading,/);
 });
 
 test("DSH thinking/model failures surface the real host reason", () => {

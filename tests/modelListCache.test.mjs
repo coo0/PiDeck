@@ -20,6 +20,8 @@ const systemIpc = readFileSync("src/main/ipc/systemIpc.ts", "utf8");
 const agentManager = readFileSync("src/main/pi/AgentManager.ts", "utf8");
 const indexSource = readFileSync("src/main/index.ts", "utf8");
 const pickerHost = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
+/** 底栏装配层：偏好链路（目录/应用命令）由它持有并注入 Dialog 与 chip 浮层两处。 */
+const composerArea = readFileSync("src/renderer/src/components/session/ComposerArea.tsx", "utf8");
 /** 模型/思考域逻辑分两半：读侧目录/档位在 state hook，写侧应用与循环在 controller
  * （选择器与 Ctrl+M/Ctrl+T 快捷键共用同一实现）。 */
 const preferenceController = [readFileSync("src/renderer/src/hooks/useSessionPreferenceState.ts", "utf8"), readFileSync("src/renderer/src/hooks/useSessionPreferenceController.ts", "utf8")].join("\n");
@@ -233,13 +235,18 @@ test("renderer picker flow shows restart confirm on needsRestart", () => {
 test("picker flow loads models on welcome page (no record)", () => {
 	// 欢迎页/未启动 Agent 时 record 为 undefined，模型列表也必须加载：
 	// 加载逻辑收敛到 useBackendModelCatalog（listModels 是全量的，不依赖 projectId），
-	// enabled 由「选择器打开 / 快捷键首次按下武装」驱动；Pi/DSH 思考选择器都要加载，
+	// enabled 由「选择器打开 / 底栏浮层打开 / 快捷键首次按下武装」驱动；Pi/DSH 思考选择器都要加载，
 	// 以便 Pi 欢迎页读取 startup capability snapshot、DSH 按 reasoningEfforts 过滤。
 	const hook = readFileSync("src/renderer/src/hooks/useBackendModelCatalog.ts", "utf8");
-	assert.match(pickerHost, /pickerOpen: props\.picker === "model" \|\| props\.picker === "thinking"/);
+	// pickerOpen 的推导归 ComposerArea（偏好链路的唯一持有者）：Dialog 打开或 chip 浮层
+	// 打开都要武装目录（浮层二级视图的列表是懒加载的）。
+	assert.match(composerArea, /pickerOpen: composer\.picker === "model" \|\| composer\.picker === "thinking"/);
+	assert.match(composerArea, /popoverOpen: chipPopoverOpen/);
 	// 目录刻意懒加载：Ctrl+M/Ctrl+T 首次按下才武装（cycleArmed），避免每个会话栏开机就拉一次
 	assert.match(preferenceController, /const catalogEnabled = options\.pickerOpen \|\| options\.cycleArmed/);
 	assert.match(preferenceController, /useBackendModelCatalog\(\{[\s\S]*?enabled: catalogEnabled/);
+	// 浮层与 Dialog 共用同一份目录状态：controller 把两者合并成一个加载开关
+	assert.match(preferenceController, /pickerOpen: options\.pickerOpen \|\| options\.popoverOpen === true/);
 	// 后端分支收敛在 hook 内：DSH 走 host 目录，pi 走诊断报告通道（含失败原因分类）
 	assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
 	assert.match(hook, /desktopApi\.sessions\.listDshModels\(\)/);
@@ -396,6 +403,9 @@ test("save models returns instantly (no pi fork on the save path) and verifies i
 test("model picker wires manual refresh + failure guide", () => {
 	const hook = readFileSync("src/renderer/src/hooks/useBackendModelCatalog.ts", "utf8");
 	const pickerHost = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
+	// 列表主体与两个容器拆开：ModelPicker（Dialog 壳）/ ModelEffortPopover（二级浮层）
+	// 都渲染同一份 ModelPickerBody——刷新按钮与失败引导只在主体里实现一次。
+	const body = readFileSync("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
 	const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
 	// 数据源切到报告通道；reload(true) = 手动刷新（绕过缓存重新 fork）
 	assert.match(hook, /listModelsReport\(options\.projectId, force\)/);
@@ -407,8 +417,8 @@ test("model picker wires manual refresh + failure guide", () => {
 	assert.match(pickerHost, /onRefresh=\{\(\) => preference\.reloadCatalog\(true\)\}/);
 	// 标题栏刷新按钮 + 空列表原因引导（版本过低/配置损坏/pi 未安装等）
 	assert.match(components, /app\.modelPickerRefresh/);
-	assert.match(components, /ModelListStatusGuide/);
-	assert.match(components, /app\.modelListFailVersionTooOld/);
-	assert.match(components, /app\.modelListFailConfigInvalid/);
-	assert.match(components, /app\.modelListFailPiNotFound/);
+	assert.match(body, /ModelListStatusGuide/);
+	assert.match(body, /app\.modelListFailVersionTooOld/);
+	assert.match(body, /app\.modelListFailConfigInvalid/);
+	assert.match(body, /app\.modelListFailPiNotFound/);
 });

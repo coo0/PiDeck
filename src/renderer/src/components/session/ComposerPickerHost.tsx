@@ -4,7 +4,7 @@ import { ComposerSkillPicker } from "./ComposerSkillPicker";
 import { t } from "../../i18n";
 import { ConfirmDialog } from "../app/AppParts";
 import type { ComposerPickerKind } from "../../hooks/useSessionComposerController";
-import { useSessionPreferenceController } from "../../hooks/useSessionPreferenceController";
+import type { SessionPreferenceController } from "../../hooks/useSessionPreferenceController";
 
 export type ComposerPickerHostProps = {
 	sessionId: string;
@@ -27,19 +27,23 @@ export type ComposerPickerHostProps = {
 
 /**
  * 选择器宿主（渲染壳）：只负责把「模型 / 思考 / 模板 / 技能」四个选择器与
- * 「需重启 Agent 才生效」的确认框渲出来，状态与应用命令全部来自
- * useSessionPreferenceController（同一份链路也被 Ctrl+M / Ctrl+T 快捷键复用）。
+ * 「需重启 Agent 才生效」的确认框渲出来；状态与应用命令全部来自外部注入的
+ * preference（useSessionPreferenceController，同一份链路也被 Ctrl+M / Ctrl+T
+ * 快捷键与底栏 chip 浮层复用）。
  */
-export function ComposerPickerHost(props: ComposerPickerHostProps) {
-	const preference = useSessionPreferenceController({
-		sessionId: props.sessionId,
-		pickerOpen: props.picker === "model" || props.picker === "thinking",
-		thinkingPickerOpen: props.picker === "thinking",
-		defaultModel: props.defaultModel,
-		defaultThinkingLevel: props.defaultThinkingLevel,
-		// 选择器点选后关闭：快捷键循环走的也是这条路径，此时 picker 本来就是 null，幂等。
-		onApplied: props.onClose,
-	});
+export function ComposerPickerHost(
+	props: ComposerPickerHostProps & {
+		/**
+		 * 模型/档位偏好链路（读侧状态 + 写侧命令）。
+		 *
+		 * 由 ComposerArea 注入而不是在本组件内 useSessionPreferenceController：
+		 * 同一份状态还要供底栏 chip 的一级/二级浮层使用（浮层与 Ctrl+M 必须共用
+		 * 同一份目录/收藏/应用命令，否则会出现「浮层改了档位、Dialog 高亮没变」）。
+		 */
+		preference: SessionPreferenceController;
+	},
+) {
+	const preference = props.preference;
 
 	if (props.picker === "template") {
 		return <PromptTemplatePicker templates={props.templates} onClose={props.onClose} onPick={props.onInsertTemplate} onInsertContent={props.onInsertTemplateContent} />;

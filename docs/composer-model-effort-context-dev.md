@@ -3,9 +3,12 @@
 > **本文件是实现的唯一权威依据。** 所有尺寸、颜色、时长、缓动、间距均为**已定稿值**，来自可交互原型
 > `docs/prototypes/composer-model-effort-context.html`。实现时必须逐项对齐；如与原型冲突，以原型为准并回来更新本文件。
 >
-> 配套：`docs/composer-model-effort-context-plan.md`（范围、风险、测试计划、交付顺序）。计划落地后删除，本文件长期保留。
+> **状态：已落地**（2026-09）。范围：**只改 composer 底栏两处**——① 模型 chip 的二级浮层；
+> ② 上下文圆环配色 + 消耗动画。落地时的两处范围修正（环几何保留 14px、chip 点击是开关语义）
+> 已在正文对应小节以「实现范围修正」/「原型修正」标出。
 >
-> 范围：**只改 composer 底栏两处**——① 模型 chip 的二级浮层；② 上下文圆环配色 + 消耗动画。
+> 配套计划文档 `docs/composer-model-effort-context-plan.md` 已按仓库文档纪律**删除**，
+> 其设计结论全部沉淀在本文件；风险与测试计划见下方 §5/§6。
 
 ---
 
@@ -59,13 +62,21 @@ export function nextView(current: EffortPopoverView, event: EffortPopoverEvent):
 | current | event | next | 说明 |
 |---|---|---|---|
 | `closed` | `open` | `effort` | 点 chip 进一级 |
+| `closed` | `toggle` | `effort` | 点 chip（开关语义，见下） |
+| `effort` | `toggle` | `closed` | 再点 chip 整个关闭 |
+| `models` | `toggle` | `closed` | 二级时点 chip 也是整个关闭（chip 是浮层总开关） |
 | `effort` | `toModels` | `models` | 点 pill 进二级 |
 | `models` | `pickModel` | `effort` | **选完自动退回一级**（不是 closed） |
 | `models` | `escape` | `effort` | Esc 逐级返回 |
 | `effort` | `escape` | `closed` | |
 | 任意 | `outside` | `closed` | 外点一律关 |
-| `effort` | `open` | `effort` | 幂等（重复点击不叠加） |
+| `effort` | `open` | `effort` | 幂等（重复触发不叠加） |
 | `closed` | `escape` / `outside` | `closed` | 幂等 |
+
+> **`toggle` 是原型修正后新增的事件**（以原型为准）：原型第 599 行是
+> `$("chip").addEventListener("click", () => pop ? closePop() : openPop())`，即
+> **chip 是开关**。原文档只列了幂等的 `open`，照它实现会导致「点开后再点 chip 关不掉」。
+> 因此 chip 的点击派发 `toggle`，`open` 保留给「幂等打开」的非点击路径。
 
 **为什么 `pickModel → effort` 而不是 `closed`**：用户选完模型通常接着调档位（两者强相关），退回一级可少一次点击。
 
@@ -305,11 +316,15 @@ overflow-y: auto; min-height: 0; padding-bottom: 4px;
            读 offsetWidth 得到最终值，再写成 `${w}px` 以驱动过渡。
    - 二级：直接用 452。
 
-③ 位置：按 chip 水平居中，再在应用边界内钳制（左右各留 8px）：
+③ 位置：按 chip 水平居中，再在边界内钳制（左右各留 8px）：
    centered = hostRect.width / 2 - w / 2
-   min      = appRect.left  + 8 - hostRect.left
-   max      = appRect.right - 8 - w - hostRect.left
+   min      = 8 - hostRect.left                        ← 以**视口**为界
+   max      = innerWidth - 8 - w - hostRect.left
    left     = clamp(centered, min, max)
+
+   > 实现取**视口**为界而不是「应用容器」：视口钳制是严格更安全的约束
+   > （浮层永不越出屏幕），且 composer 本就横跨窗口，两者结果一致；
+   > 这样也无需为取应用根节点再穿一层 ref。
 
 ④ 重量宽度只在模型变化时触发：
    用 lastMeasuredKey 守卫（记录上次量宽时的模型 key）。
@@ -370,6 +385,25 @@ fallback 取值优先级：模型默认档位 > levels 的中间档 > levels[0]
 ---
 
 ## 2. 改动二：上下文圆环配色 + 消耗动画
+
+> **实现范围修正（与原型/本文档原稿的差异，已在代码中落地）**
+>
+> 原稿描述「圆环 19px + 环外右侧百分比数字 + conic-gradient」，但仓库基线是
+> **14px SVG 描边环（`viewBox="0 0 14 14"`、r=5.5、2px stroke）、且没有环外数字**
+> （数字只在 tooltip 与面板里）。经确认本改动的范围为：**保留 14px SVG 环，只把
+> 灰环换成状态色**，因此：
+>
+> | 项 | 原稿 | 实际实现 |
+> |---|---|---|
+> | 环几何 | 19px `conic-gradient` 甜甜圈 | 保留 14px SVG 描边环 |
+> | 环外数字 | 新增 | **不加**（沿用 tooltip/面板） |
+> | 双色渐变 | `conic-gradient` | SVG `linearGradient`（描边环无法用 conic-gradient） |
+> | 压缩预警弧（≤20%） | 外圈斜线弧 | **未实现**（依赖 19px 几何的 `inset:-3px`） |
+> | 容器边框/hover 光晕 | 按状态上色 | 未改（避免与既有 hover 观感冲突） |
+> | 消耗扣血动画 | 1800ms 向左飞出 | **已实现**（本节 §2.2 全部落地） |
+>
+> 颜色映射与分档阈值（`--ctx-*` / `contextRingLevel`）**完全按本文档实现**，
+> 仅承载几何不同；若将来恢复 19px 环，补回 `conic-gradient` 与预警弧即可。
 
 ### 2.1 圆环配色
 
@@ -618,7 +652,7 @@ export function effortColorVar(effort: string): string {
 
 ---
 
-## 5. 验收（与计划文档 §6 一致，此处为逐项参数核对）
+## 5. 验收（逐项参数核对）
 
 **模型浮层**
 - [ ] 一级浮层宽 `230–430px`，随模型名自适应；二级固定 `452px`
@@ -651,4 +685,4 @@ export function effortColorVar(effort: string): string {
 | `tests/rendererProductCopyI18n.test.mjs` | 新增文案中英同步 |
 | `tests/sessionRuntimeTargetBoundaries.test.mjs` | 未新增 runtime 命令（本改动不应触发） |
 
-新增单测：`effortSlider` / `modelEffortPopover` / `contextSpend` / `effortColors`（见计划文档 §5.1）。
+新增单测：`effortSlider` / `modelEffortPopover` / `contextSpend` / `effortColors`。

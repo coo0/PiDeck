@@ -343,6 +343,49 @@
   }
 }
 
+/* ── 上下文消耗扣血动画（圆环向左飞出 -N tok）───────────────────────
+ * 信息反馈（告知刚消耗了多少），不是装饰：新消耗产生时从圆环向左飞出，
+ * 1800ms 放大淡出；队列串行（见 hooks/useContextSpendEffects.ts），
+ * 圆环同步 pulse 620ms 让「扣血」有主体。
+ * 关键帧断点取自 codex-context-used-meter 的 ccm-hit-pop（方向改为向左），
+ * 时长/缓动与 docs/composer-model-effort-context-dev.md §2.2 一致。
+ * 减少动效在 hook 层直接跳过入队（不做静态残留），此处不加 media 分支。 */
+@theme {
+  --animate-context-hit: context-hit 1800ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
+  --animate-context-pulse: context-pulse 620ms cubic-bezier(0.16, 0.84, 0.24, 1);
+
+  @keyframes context-hit {
+    0% {
+      opacity: 0;
+      transform: translate(0, -50%) scale(0.68);
+    }
+    11% {
+      opacity: 1;
+      transform: translate(-10px, -51%) scale(1);
+    }
+    70% {
+      opacity: 1;
+      transform: translate(-52px, -54%) scale(1.2);
+    }
+    100% {
+      opacity: 0;
+      transform: translate(-72px, -56%) scale(1.32);
+    }
+  }
+
+  @keyframes context-pulse {
+    0% {
+      transform: scale(1);
+    }
+    28% {
+      transform: scale(1.22);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+}
+
 /* hover 滚动时收窄右端渐隐（legacy 的 28px mask 会吃掉滚出的尾端文字）；
  * 仅在 animate-title-scroll 同用时生效，未滚动的行保持原渐隐截断观感。 */
 @utility title-scroll-mask-narrow {

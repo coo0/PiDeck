@@ -5,6 +5,7 @@ import { TipTapComposer } from "./composer";
 import { SessionReferenceModal } from "../app/SessionReferenceModal";
 import { t } from "../../i18n";
 import { useSessionComposerController } from "../../hooks/useSessionComposerController";
+import { useSessionPreferenceController } from "../../hooks/useSessionPreferenceController";
 import { ComposerAttachmentBar, ComposerSendControls, SessionDeliveryNotice } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
@@ -108,6 +109,25 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	});
 
 	const modelPendingMap = useAtomValue(modelPendingByIdAtom);
+	/** 底栏 chip 浮层是否打开：二级视图需要模型目录，用它武装目录懒加载。 */
+	const [chipPopoverOpen, setChipPopoverOpen] = useState(false);
+
+	// 模型/档位偏好链路（读侧状态 + 写侧命令）：由本组件持有并同时注入
+	// ①底栏 chip 的浮层（一级滑块 + 二级列表）与 ②选择器宿主（Ctrl+M / Ctrl+T 的 Dialog）。
+	// 两侧必须共用同一份目录/收藏/应用命令：分叉会出现「浮层改了档位、Dialog 高亮没变」
+	// 或「两处各拉一次模型目录」的浪费。pickerOpen 由当前 picker 状态驱动（目录懒加载）。
+	const preference = useSessionPreferenceController({
+		sessionId: props.sessionId,
+		pickerOpen: composer.picker === "model" || composer.picker === "thinking",
+		thinkingPickerOpen: composer.picker === "thinking",
+		defaultModel: composer.dshDefaultModel ?? composer.bootstrapDefaultModel,
+		defaultThinkingLevel: composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel,
+		// 选择器点选后关闭：快捷键循环走的也是这条路径，此时 picker 本来就是 null，幂等。
+		onApplied: composer.pickers.close,
+		// 浮层（chip 一级/二级）打开也要武装模型目录：二级视图的列表是懒加载的，
+		// 不武装就会出现「点开二级看到空列表」。
+		popoverOpen: chipPopoverOpen,
+	});
 
 	const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
@@ -225,8 +245,27 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											/* 快捷消息：点条目插入草稿，条目右侧按钮直发（正文不进草稿，见 useSessionSend 的 overrideText 契约） */
 											<QuickMessageMenu disabled={composer.isStarting} sendDisabled={!composer.delivery.canSendQuickMessage} onInsert={composer.pickers.insertQuickMessage} onSend={composer.delivery.sendQuickMessage} />
 										}
-										onPickModel={() => composer.pickers.open("model")}
-										onPickThinking={() => composer.pickers.open("thinking")}
+										onPickThinking={(effort) => void preference.applyThinking(effort)}
+										currentEffort={preference.currentThinkingLevel}
+										thinkingLevels={preference.thinkingLevels}
+										modelPickerSource={{
+											models: preference.models,
+											report: preference.report,
+											loading: preference.catalogLoading,
+											refreshing: preference.refreshing,
+											onRefresh: () => preference.reloadCatalog(true),
+											current: preference.currentModel,
+											favoriteModels: preference.favoriteModels,
+											onToggleFavorite: (provider: string, modelId: string) => void preference.toggleFavorite(provider, modelId),
+											recentProviders: preference.recentProviders,
+											providerOrder: preference.isDshSession ? preference.dshProviderOrder : preference.providerOrder,
+											hiddenProviders: preference.hiddenProviders,
+											hiddenModels: preference.hiddenModels,
+											onToggleHideModel: (provider: string, modelId: string) => void preference.toggleHideModel(provider, modelId),
+											backend: preference.isDshSession ? "dsh" : "pi",
+										}}
+										onPickModel={(model) => void preference.applyModel(model)}
+										onModelPopoverOpenChange={setChipPopoverOpen}
 										onPickPromptTemplate={() => composer.pickers.open("template")}
 										onPickSkill={() => composer.pickers.open("skill")}
 										onCompact={composer.delivery.compact}
@@ -262,6 +301,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 					</footer>
 					<ComposerPickerHost
 						sessionId={props.sessionId}
+						preference={preference}
 						picker={composer.picker}
 						templates={composer.templates}
 						onClose={composer.pickers.close}

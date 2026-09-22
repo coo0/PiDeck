@@ -38,6 +38,8 @@ export function CommandPickerGroup(props: {
 	 * 不要塞进 label（label 是截断主体）。布局：名称 · 数量 …… 用量（最右）。
 	 */
 	trailing?: ReactNode;
+	/** 紧凑度量（二级浮层）：分组头 7px 13px，与原型一致；缺省用 Dialog 的宽松度量。 */
+	dense?: boolean;
 	defaultOpen?: boolean;
 	children: ReactNode;
 	className?: string;
@@ -54,7 +56,7 @@ export function CommandPickerGroup(props: {
 		<div className={cn("border-b border-border/45 last:border-b-0", props.className)}>
 			<button
 				type="button"
-				className="flex w-full cursor-pointer items-center gap-1.5 px-3 py-1.5 text-left text-control font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+				className={cn("flex w-full cursor-pointer items-center gap-1.5 text-left text-control font-medium text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50", props.dense ? "px-[13px] py-[7px]" : "px-3 py-1.5")}
 				aria-expanded={expanded}
 				onClick={() => toggleGroup(props.id)}
 			>

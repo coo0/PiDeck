@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
 import { useSetAtom } from "jotai";
@@ -11,6 +11,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
 import { formatPercent } from "./TimelineFormat";
+import { contextRingColorVars, contextRingLevelFromUsed } from "../../utils/contextSpend";
+import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
 
 /**
  * composer 发送按钮旁的上下文占用圆环（移植自 dsh-web ContextMeter）。
@@ -34,12 +36,17 @@ import { formatPercent } from "./TimelineFormat";
  * - 圆环常驻：percent 或 window 缺失（会话未运行/模型切换瞬间）时渲染 0% 占位环，
  *   面板内容降级为「上下文数据暂不可用」，不再整环隐藏。
  * - 命中率/输入输出行按数据存在性渲染，缺字段不占位。
+ *
+ * 颜色即状态（2026-09）：弧身改用双色状态渐变（normal 蓝紫 / 预警黄橙 / 危险橙红），
+ * 分档基于**剩余**占用（`contextRingLevelFromUsed(percent)` = `contextRingLevel(100 - percent)`）；
+ * 弧长仍表示**已用**（与 tooltip「上下文已用 X%」、面板同口径）——两者方向一致：环越满越红。
+ * 新消耗时从圆环向左飞出 `-N tok`（队列串行，见 useContextSpendEffects）：
+ * 同一读数重复上报、压缩后回落、会话切换均不触发。
  */
 
 /** 圆环几何：14px viewBox、2px 描边（dsh 逐字节移植）。 */
 const RADIUS = 5.5;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
-
 /** 两段图例色：对话=蓝、系统+工具=紫（dsh ROWS 的 messages/tools 色系）。 */
 const COLOR_CONVERSATION = "var(--color-context-conversation, #2563eb)";
 const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250))";
@@ -135,6 +142,8 @@ export function contextSegments(state: Pick<AgentRuntimeState, "contextTokens" |
 }
 
 export function SessionContextMeter(props: {
+	/** 会话身份：扣血动画的基线归属（切会话不跨会话算差）。 */
+	sessionId: string;
 	state?: Pick<
 		AgentRuntimeState,
 		"contextPercent" | "contextTokens" | "contextWindow" | "contextMessageTokens" | "cacheHitPercent" | "cacheHitAveragePercent" | "cacheHitSampleCount" | "inputTokens" | "outputTokens" | "isCompacting" | "cost" | "ttftMs" | "totalMs" | "tps" | "cacheRead" | "cacheWrite" | "cacheTotal" | "provider"
@@ -155,6 +164,9 @@ export function SessionContextMeter(props: {
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
+	/** 环身双色渐变的 SVG gradient id：同页多个圆环（分屏）必须唯一，
+	 *  否则后挂载的实例会覆盖前面的渐变定义。 */
+	const ringGradientId = `ctx-ring-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
 	/** 面板 fixed 定位：相对 viewport 的 {left, top}；null = 尚未定位（首帧隐藏） */
 	const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -274,6 +286,11 @@ export function SessionContextMeter(props: {
 					return parts.filter((part) => part.tokens > 0).map((part) => ({ key: part.key, color: part.color, width: Math.min(100, (percent * part.tokens) / breakdownTotal) }));
 				})()
 			: undefined;
+	// 圆环颜色即状态：分档基于**剩余**占用（弧长仍表示已用，与 tooltip/面板同口径）。
+	const ringLevel = contextRingLevelFromUsed(context?.percent ?? 0);
+	const ringColors = contextRingColorVars(ringLevel);
+	// 扣血动画：相邻两帧的正向增量才触发（重复读数/压缩回落/会话切换都不触发）。
+	const spend = useContextSpendEffects({ sessionId: props.sessionId, tokens: props.state?.contextTokens });
 	const showCompact = props.onCompact !== undefined;
 	// 压缩按钮态走共享策略：无占用数据（percent 未上报）禁用；压缩中禁用。
 	// 传 context?.percent 而非 ?? 0 后的 percent：占位环需要 0，但未就绪判定
@@ -284,6 +301,20 @@ export function SessionContextMeter(props: {
 
 	return (
 		<span ref={rootRef} className="relative inline-flex" data-testid="session-context-meter">
+			{/* 扣血数字：从圆环向左飞出（-N tok），1800ms 放大淡出；队列串行保证同时只有一条。
+			    key=pulseKey 重挂元素以重启动画（同一标签连续两次也要重播）；
+			    animationend 推进队列，hook 内另有超时兜底（动画被中断时不卡死）。 */}
+			{spend.spendLabel !== null && (
+				<span
+					key={spend.pulseKey}
+					data-testid="session-context-spend"
+					onAnimationEnd={spend.onSpendAnimationEnd}
+					className="animate-context-hit pointer-events-none absolute top-1/2 right-full z-[9] mr-0.5 bg-clip-text font-mono text-control font-extrabold leading-none whitespace-nowrap text-transparent"
+					style={{ backgroundImage: "var(--ctx-spend-gradient)", filter: "var(--ctx-spend-glow)" }}
+				>
+					{spend.spendLabel}
+				</span>
+			)}
 			<Tooltip>
 				<TooltipTrigger asChild>
 					<button
@@ -297,9 +328,18 @@ export function SessionContextMeter(props: {
 							setOpen((value) => !value);
 						}}
 					>
-						<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true">
-							<circle className="fill-none stroke-[var(--color-border)]" cx="7" cy="7" r={RADIUS} strokeWidth={2} />
-							<circle className="fill-none stroke-[var(--color-text-tertiary)] [stroke-linecap:round]" cx="7" cy="7" r={RADIUS} strokeWidth={2} strokeDasharray={`${(CIRCUMFERENCE * percent) / 100} ${CIRCUMFERENCE}`} transform="rotate(-90 7 7)" />
+						<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" className={spend.spendLabel !== null ? "animate-context-pulse" : undefined}>
+							{/* 双色状态渐变：14px SVG 环无法用 conic-gradient 描边，
+							    改用与环同构的线性渐变（起点 --ctx-ok/--ctx-warn/--ctx-warn2 →
+							    终点 --ctx-ok2/--ctx-warn2/--ctx-danger），颜色即状态的语义不变。 */}
+							<defs>
+								<linearGradient id={ringGradientId} x1="0" y1="0" x2="14" y2="14" gradientUnits="userSpaceOnUse">
+									<stop offset="0%" stopColor={ringColors.a} />
+									<stop offset="100%" stopColor={ringColors.b} />
+								</linearGradient>
+							</defs>
+							<circle className="fill-none" cx="7" cy="7" r={RADIUS} strokeWidth={2} stroke="var(--ctx-track)" />
+							<circle className="fill-none [stroke-linecap:round]" cx="7" cy="7" r={RADIUS} strokeWidth={2} stroke={`url(#${ringGradientId})`} strokeDasharray={`${(CIRCUMFERENCE * percent) / 100} ${CIRCUMFERENCE}`} transform="rotate(-90 7 7)" />
 						</svg>
 					</button>
 				</TooltipTrigger>

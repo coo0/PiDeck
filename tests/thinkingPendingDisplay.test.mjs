@@ -55,10 +55,16 @@ test("resolveComposerThinkingLevel: 非 live 时忽略残留 state，展示 cata
 
 test("契约: thinking 按钮运行中可点，启动中禁用", () => {
 	const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
-	// 模板/模式仍随 disabled 禁用；thinking / 模型按钮有独立禁用位
+	const popover = readFileSync("src/renderer/src/components/session/ModelEffortPopover.tsx", "utf8");
+	// 模板/模式仍随 disabled 禁用；thinking / 模型按钮有独立禁用位。
+	// 思考档位入口已从 chip 的两行菜单改为浮层滑块，禁用位随之改名
+	// （thinkingDisabled → effortDisabled），语义不变：启动中禁用、运行中可点。
 	assert.match(components, /disabled=\{props\.disabled\}/);
-	assert.match(components, /disabled=\{props\.thinkingDisabled\}/);
+	assert.match(components, /effortDisabled=\{props\.thinkingDisabled\}/);
 	assert.match(components, /disabled=\{props\.modelDisabled \?\? props\.disabled\}/);
+	// 浮层把禁用位接到滑块（pill 与滑块共用同一开关）
+	assert.match(popover, /effortDisabled\?: boolean/);
+	assert.match(popover, /disabled=\{props\.effortDisabled\}/);
 	assert.doesNotMatch(components, /thinkingPending|ThinkingLevelPending|thinkingDisplay\.levels\.map/);
 });
 

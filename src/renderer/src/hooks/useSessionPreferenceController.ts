@@ -77,6 +77,14 @@ export function useSessionPreferenceController(options: {
 	pickerOpen: boolean;
 	/** 思考选择器是否打开（决定要不要向运行中 Agent 校验精确档位） */
 	thinkingPickerOpen: boolean;
+	/**
+	 * 浮层（底栏 chip 的一级/二级）是否打开。
+	 *
+	 * 与 pickerOpen 分开是因为二者是**不同入口**：pickerOpen 指 Ctrl+M 的 Dialog，
+	 * 本项指 chip 浮层。但二级视图同样需要模型目录，所以任一为真都要加载目录
+	 * （目录是懒加载的，不武装就会打开二级看到空列表）。
+	 */
+	popoverOpen?: boolean;
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
@@ -94,8 +102,8 @@ export function useSessionPreferenceController(options: {
 	const [restarting, setRestarting] = useState(false);
 	const state = useSessionPreferenceState({
 		sessionId,
-		pickerOpen: options.pickerOpen,
-		thinkingPickerOpen: options.thinkingPickerOpen,
+		pickerOpen: options.pickerOpen || options.popoverOpen === true,
+		thinkingPickerOpen: options.thinkingPickerOpen || options.popoverOpen === true,
 		cycleArmed,
 		defaultModel: options.defaultModel,
 		defaultThinkingLevel: options.defaultThinkingLevel,

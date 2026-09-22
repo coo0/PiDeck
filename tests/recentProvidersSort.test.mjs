@@ -8,6 +8,8 @@ const { orderProviderGroups } = loadTsCommonJs("src/renderer/src/components/sess
 const settingsStore = readFileSync("src/main/settings/SettingsStore.ts", "utf8");
 const sessionIpc = readFileSync("src/main/ipc/sessionIpc.ts", "utf8");
 const components = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
+/** 列表主体（收藏/隐藏/分组排序/行渲染）——Dialog 与底栏二级浮层共用同一份。 */
+const modelPickerBody = readFileSync("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
 const pickerHost = readFileSync("src/renderer/src/components/session/ComposerPickerHost.tsx", "utf8");
 /** 模型/思考域状态由 state hook + controller 持有（选择器渲染壳只透传）。 */
 const preferenceController = [readFileSync("src/renderer/src/hooks/useSessionPreferenceState.ts", "utf8"), readFileSync("src/renderer/src/hooks/useSessionPreferenceController.ts", "utf8")].join("\n");
@@ -74,11 +76,15 @@ describe("recentProviders 链路契约（源码级）", () => {
 	});
 
 	test("ModelPicker 接收 recentProviders 并按 orderProviderGroups 排序", () => {
-		assert.match(components, /recentProviders\?: string\[\]/);
-		assert.match(components, /orderProviderGroups\(Object\.keys\(groupedModels\)/);
-		assert.match(components, /props\.recentProviders/);
+		// 派生与排序已随列表主体抽到 ModelPickerBody（Dialog 与底栏二级浮层共用一份），
+		// 契约仍必须成立：接收 recentProviders 并按 orderProviderGroups 排分组。
+		assert.match(modelPickerBody, /recentProviders\?: string\[\]/);
+		assert.match(modelPickerBody, /orderProviderGroups\(Object\.keys\(groupedModels\)/);
+		assert.match(modelPickerBody, /source\.recentProviders/);
 		// 旧的内联 providerOrder 排序已移除。
-		assert.doesNotMatch(components, /const providerOrder = \[/);
+		assert.doesNotMatch(modelPickerBody, /const providerOrder = \[/);
+		// 两个容器都透传：Dialog 壳（ModelPicker）与底栏浮层
+		assert.match(components, /<ModelPickerBody \{\.\.\.props\} view=\{view\} \/>/);
 	});
 
 	test("ComposerPickerHost 读 settings.recentProviders 并传给 ModelPicker", () => {

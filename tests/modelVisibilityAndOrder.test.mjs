@@ -104,9 +104,17 @@ test("契约完整性：ComposerComponents 与 ComposerPickerHost 支持 hiddenM
 	const modelsTable = readFileSync("src/renderer/src/config/ModelsTable.tsx", "utf8");
 	const configModal = readFileSync("src/renderer/src/ConfigModal.tsx", "utf8");
 
-	// 选择器传递与处理
-	assert.ok(composer.includes("hiddenModels?: string[];"));
+	// 选择器传递与处理（列表主体已抽到 ModelPickerBody，Dialog 与浮层共用；
+	// 壳层 ComposerComponents 仍必须声明这两个 props 并透传给主体）
+	const body = readFileSync("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
+	assert.ok(body.includes("hiddenModels?: string[];"));
+	assert.ok(body.includes("onToggleHideModel?: (provider: string, modelId: string) => void;"));
+	// ModelPicker 的 props 现在继承 ModelPickerSource（hiddenModels 在其中声明）+
+	// 显式声明 onToggleHideModel（收藏/隐藏是同层的交互回调）。
+	assert.ok(composer.includes("ModelPickerSource"), "ModelPicker 必须继承共享的列表数据源类型");
 	assert.ok(composer.includes("onToggleHideModel?: (provider: string, modelId: string) => void;"));
+	// 壳层不重声明 hiddenModels（避免与共享类型分叉）：只在 ModelPickerSource 里声明一次
+	assert.ok(!composer.includes("hiddenModels?: string[];"));
 	assert.ok(preferenceState.includes("setHiddenModels(settings.hiddenModels ?? []);"));
 	assert.ok(preferenceState.includes("toggleHideModel"));
 	assert.ok(host.includes("hiddenModels={preference.hiddenModels}"));

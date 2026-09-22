@@ -1,12 +1,11 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
-import { AlertCircle, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Sparkles, Star, Target, Wrench, X } from "lucide-react";
+import { Brain, Check, ChevronDown, ChevronLeft, CornerDownLeft, Eye, FileText, GitBranch, ImageIcon, ListChecks, Paperclip, Plus, RefreshCw, Sparkles, Target, Wrench, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
 import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
 import { cn } from "../../lib/utils";
 import { showNotice } from "../../utils/notice";
-import { Popover, PopoverContent, PopoverTrigger } from "../ui-shadcn/popover";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
 import { ConfirmDialog } from "../app/AppParts";
 import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
@@ -23,6 +22,10 @@ import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, read
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
+import { ModelPickerBody, currentModelKeyOf, modelPickerFilter, resolveModelPickerView, type ModelPickerSource } from "./ModelPickerBody";
+import { ModelEffortPopover } from "./ModelEffortPopover";
+import { effortColorVar } from "../../utils/effortColors";
+import { isPopoverOpen, nextView, type EffortPopoverEvent, type EffortPopoverView } from "../../utils/modelEffortPopover";
 import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, UsageProbeBackend } from "../../../../shared/types";
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
@@ -262,10 +265,18 @@ export function ComposerBottomBar(props: {
 	quickMessagesControl?: ReactNode;
 	voiceControls: ReactNode;
 	sendControls: ReactNode;
-	onPickModel: () => void;
+	onPickModel: (model: AvailableModel) => void;
 	onPickPromptTemplate: () => void;
 	onPickSkill: () => void;
-	onPickThinking: () => void;
+	onPickThinking: (effort: string) => void;
+	/** 当前思考档位 id（浮层滑块用；与 thinkingText 同源）。 */
+	currentEffort?: string;
+	/** 可用档位（resolveThinkingPickerLevels 的唯一产物，与 Ctrl+T 的 Dialog 同源）。 */
+	thinkingLevels?: Array<{ value: string; labelKey?: TranslationKey; label?: string }>;
+	/** 二级视图的模型目录/偏好（与 Ctrl+M 的 Dialog 同一份数据源）。 */
+	modelPickerSource?: ModelPickerSource & { onToggleFavorite?: (provider: string, modelId: string) => void; onToggleHideModel?: (provider: string, modelId: string) => void };
+	/** 浮层开关状态上报（模型目录懒加载武装用）。 */
+	onModelPopoverOpenChange?: (open: boolean) => void;
 	onCompact: () => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
 	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
@@ -495,10 +506,14 @@ export function ComposerBottomBar(props: {
 							modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined}
 							modelPendingTitle={modelPendingTitle}
 							thinkingText={thinkingText}
+							currentEffort={props.currentEffort}
+							thinkingLevels={props.thinkingLevels ?? THINKING_LEVELS}
+							pickerSource={props.modelPickerSource ?? { models: [] }}
 							disabled={props.modelDisabled ?? props.disabled}
 							thinkingDisabled={props.thinkingDisabled}
 							onPickModel={props.onPickModel}
 							onPickThinking={props.onPickThinking}
+							onPopoverOpenChange={props.onModelPopoverOpenChange}
 						/>
 					)}
 					{/* DSH 压缩入口与 pi 统一：上下文圆环（右侧）常驻并带压缩按钮。
@@ -514,6 +529,7 @@ export function ComposerBottomBar(props: {
 					    圆环与压缩入口一并屏蔽。 */}
 					{isImageGenMode ? null : (
 						<SessionContextMeter
+							sessionId={props.sessionId}
 							state={props.state}
 							onCompact={props.onCompact}
 							backend={usageBackend}
@@ -552,52 +568,87 @@ export function ComposerBottomBar(props: {
  * 交互：点击弹出 root 菜单两行（模型 / 思考），drill-in 复用现有 Dialog 选择器
  * （onPickModel / onPickThinking），列表 UI 不重做。
  */
+/**
+ * 模型 + 思考合并选择 chip（借鉴 dsh ModelSelect 的 trigger 形态）。
+ *
+ * 显示：`模型名 · 思考档位 + chevron` 一体（保持原样）。
+ * 交互：点 chip 弹**一级浮层**（档位 pill + 蓝色滑块，改档位零弹窗）；点 pill 进
+ * **二级浮层**（选择模型列表，复用 Ctrl+M 的 ModelPickerBody）。两级共用一个容器，
+ * 宽度 230↔452px 过渡；选中模型后退回一级，Esc 逐级返回，外点关闭。
+ *
+ * 定位宿主：外层 wrapper 是 `position: relative`，浮层与 chip 同级——挂到应用容器
+ * 会让 `left: 0` 把浮层甩到最左边（原型实测）。
+ */
 function ModelThinkingChip(props: {
 	modelLabel: string;
 	/** 模型待生效切换的目标 label（存在时显示 from → to） */
 	modelPendingTo?: string;
 	modelPendingTitle?: string;
 	thinkingText: string;
+	/** 当前思考档位 id（滑块用；与 chip 的 thinkingText 同源）。 */
+	currentEffort?: string;
+	/** 可用档位（resolveThinkingPickerLevels 的唯一产物）。 */
+	thinkingLevels: Array<{ value: string; labelKey?: TranslationKey; label?: string }>;
 	disabled?: boolean;
 	thinkingDisabled?: boolean;
-	onPickModel: () => void;
-	onPickThinking: () => void;
+	/** 模型目录/偏好（二级视图用；与 Ctrl+M 的 Dialog 同一份数据源）。 */
+	pickerSource: ModelPickerSource & { onToggleFavorite?: (provider: string, modelId: string) => void; onToggleHideModel?: (provider: string, modelId: string) => void };
+	onPickModel: (model: AvailableModel) => void;
+	onPickThinking: (effort: string) => void;
+	/** 浮层开关状态上报：二级视图需要模型目录，用它武装目录懒加载。 */
+	onPopoverOpenChange?: (open: boolean) => void;
 }) {
-	const [open, setOpen] = useState(false);
+	// 两级状态机：唯一正确行为见 utils/modelEffortPopover（已单测）。
+	const [view, setView] = useState<EffortPopoverView>("closed");
+	const hostRef = useRef<HTMLSpanElement | null>(null);
+	const onPopoverOpenChangeRef = useRef(props.onPopoverOpenChange);
+	onPopoverOpenChangeRef.current = props.onPopoverOpenChange;
+	const dispatch = useCallback((event: EffortPopoverEvent) => {
+		setView((current) => {
+			const next = nextView(current, event);
+			if (next !== current) onPopoverOpenChangeRef.current?.(next !== "closed");
+			return next;
+		});
+	}, []);
 	const modelValue = props.modelPendingTo ? `${props.modelLabel} → ${props.modelPendingTo}` : props.modelLabel;
-	const drillIn = (action: () => void) => {
-		setOpen(false);
-		action();
-	};
+	// 档位名与 chip 同源（i18n labelKey → label → 原样 id）。
+	const effortText = props.thinkingText;
+
 	return (
-		<Popover open={open} onOpenChange={setOpen}>
-			<PopoverTrigger asChild>
-				<Button variant="ghost" size="sm" className="composer-bar-btn model-thinking flex h-7 min-w-0 max-w-[52ch] gap-1 rounded-md px-2 text-caption font-medium text-foreground hover:bg-muted/60" title={props.modelPendingTitle ?? t("app.modelPickerTitle")}>
-					<span className="min-w-0 truncate">{modelValue}</span>
-					<span className="flex-none text-muted-foreground/70" aria-hidden="true">
-						·
-					</span>
-					<span className="flex-none truncate text-muted-foreground" title={t("app.thinkingPickerTitle")}>
-						{props.thinkingText}
-					</span>
-					<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-150${open ? " rotate-180" : ""}`} />
-				</Button>
-			</PopoverTrigger>
-			<PopoverContent align="center" side="top" className="w-56 p-1">
-				<div className="flex flex-col">
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickModel)} disabled={props.disabled} title={t("app.modelPickerTitle")}>
-						<span className="text-muted-foreground">{t("app.model")}</span>
-						<span className="min-w-0 flex-1 truncate text-foreground">{modelValue}</span>
-						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
-					</button>
-					<button type="button" className="flex h-9 items-center gap-2 rounded-md px-2 text-left text-control hover:bg-muted/60 disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent" onClick={() => drillIn(props.onPickThinking)} disabled={props.thinkingDisabled} title={t("app.thinkingPickerTitle")}>
-						<span className="text-muted-foreground">{t("app.think")}</span>
-						<span className="min-w-0 flex-1 truncate text-foreground">{props.thinkingText}</span>
-						<ChevronRight size={14} aria-hidden="true" className="flex-none text-muted-foreground" />
-					</button>
-				</div>
-			</PopoverContent>
-		</Popover>
+		<span ref={hostRef} className="relative inline-flex">
+			<Button
+				variant="ghost"
+				size="sm"
+				className="composer-bar-btn model-thinking flex h-7 min-w-0 max-w-[52ch] gap-1 rounded-md px-2 text-caption font-medium text-foreground hover:bg-muted/60"
+				title={props.modelPendingTitle ?? t("app.modelPickerTitle")}
+				aria-expanded={isPopoverOpen(view)}
+				onClick={() => dispatch({ kind: "toggle" })}
+			>
+				<span className="min-w-0 truncate">{modelValue}</span>
+				<span className="flex-none text-muted-foreground/70" aria-hidden="true">
+					·
+				</span>
+				<span className="flex-none truncate" style={{ color: effortColorVar(props.currentEffort) }} title={t("app.thinkingPickerTitle")}>
+					{effortText}
+				</span>
+				<ChevronDown size={12} aria-hidden="true" className={`flex-none text-muted-foreground transition-transform duration-150${isPopoverOpen(view) ? " rotate-180" : ""}`} />
+			</Button>
+			{/* 浮层与 chip 同级（同一个 relative 宿主内）：定位以 chip 为锚点居中。 */}
+			<ModelEffortPopover
+				view={view}
+				onViewEvent={dispatch}
+				onClose={() => dispatch({ kind: "outside" })}
+				modelLabel={props.modelLabel}
+				modelPendingTo={props.modelPendingTo}
+				currentEffort={props.currentEffort}
+				levels={props.thinkingLevels}
+				onPickEffort={props.onPickThinking}
+				onPickModel={props.onPickModel}
+				effortDisabled={props.thinkingDisabled}
+				anchorRef={hostRef}
+				{...props.pickerSource}
+			/>
+		</span>
 	);
 }
 
@@ -667,199 +718,17 @@ function CommandPickerDialog(props: {
 	);
 }
 
-/** 模型列表加载失败原因 → 引导文案（硬失败时替换通用空态，给出可操作动作）。 */
-const MODEL_LIST_FAILURE_REASON_TEXT: Record<ModelListFailReason, TranslationKey> = {
-	"pi-not-found": "app.modelListFailPiNotFound",
-	"version-too-old": "app.modelListFailVersionTooOld",
-	"config-invalid": "app.modelListFailConfigInvalid",
-	"cli-failed": "app.modelListFailCliFailed",
-	"waf-blocked": "app.modelListFailWafBlocked",
-	empty: "app.modelListFailEmpty",
-};
-
-/**
- * 模型列表为空时的引导块：按失败原因给出差异化建议（升级 pi / 修配置 / 配 pi 路径 / 添加模型），
- * 并附手动刷新入口（重新调用 pi --list-models）。
- * 「加载不出来」最常见两类根因：pi 版本过低（连 --list-models 都不认）与 models.json/auth.json
- * 配置损坏（CLI 与本地解析双双失败）——此前只显示"没有匹配的模型"，用户无从排查。
- */
-function ModelListStatusGuide(props: { report: ModelListReport | null; refreshing?: boolean; onRefresh?: () => void }) {
-	const report = props.report;
-	if (!report) return null;
-	const hardFailure = !report.ok && report.reason !== null;
-	const textKey = hardFailure ? MODEL_LIST_FAILURE_REASON_TEXT[report.reason as ModelListFailReason] : "app.modelListEmptyGuide";
-	return (
-		<div className="flex flex-col items-start gap-2.5 px-4 py-5" role="alert">
-			<div className="flex items-center gap-2 text-body font-semibold text-foreground">
-				<AlertCircle size={15} className={hardFailure ? "text-destructive" : "text-muted-foreground"} aria-hidden="true" />
-				{hardFailure ? t("app.modelListLoadFailed") : t("app.modelListEmptyTitle")}
-			</div>
-			<p className="text-caption leading-relaxed text-muted-foreground">{t(textKey)}</p>
-			{report.detail && <pre className="max-h-28 w-full overflow-auto whitespace-pre-wrap break-all rounded-md border border-border/60 bg-muted/40 p-2.5 font-mono text-[11px] leading-relaxed text-muted-foreground">{report.detail}</pre>}
-			{props.onRefresh && (
-				<Button variant="outline" size="sm" className="mt-1" onClick={props.onRefresh} disabled={props.refreshing}>
-					<RefreshCw size={13} className={props.refreshing ? "animate-pideck-spin" : ""} aria-hidden="true" />
-					{props.refreshing ? t("app.modelPickerRefreshing") : t("app.modelPickerRetry")}
-				</Button>
-			)}
-		</div>
-	);
-}
-
-/**
- * 首次加载态：模型目录还没返回任何报告时的占位。
- * 旧实现在此状态下面板完全空白（models=[] 且 report=null 两个分支都不命中），
- * 用户以为「选择器里没有模型」；改为明确的加载提示。
- */
-function ModelListLoadingState() {
-	return (
-		<div className="flex items-center gap-2.5 px-4 py-5 text-caption text-muted-foreground" role="status" aria-live="polite">
-			<Loader2 size={15} className="animate-pideck-spin" aria-hidden="true" />
-			{t("app.modelListLoading")}
-		</div>
-	);
-}
-
-export function ModelPicker(props: {
-	models: AvailableModel[];
-	current?: { provider?: string; modelId?: string; modelName?: string };
-	onClose: () => void;
-	onPick: (model: AvailableModel) => void;
-	/** 收藏的模型 ID 列表（格式：provider/modelId），收藏的模型独立置顶显示但仍保留在原供应商分组 */
-	favoriteModels?: string[];
-	/** 切换收藏状态；引导页不提供收藏操作，因此允许省略。 */
-	onToggleFavorite?: (provider: string, modelId: string) => void;
-	/** 模型列表加载报告：为空时（加载失败/无模型）展示原因引导（版本过低/配置损坏/pi 未安装等）。 */
-	report?: ModelListReport | null;
-	/** 首次加载在途：列表为空时展示加载态（与 report=null 配对使用） */
-	loading?: boolean;
-	/** 手动刷新进行中（重新调用 pi --list-models） */
-	refreshing?: boolean;
-	/** 手动刷新：绕过缓存重新拉取模型列表 */
-	onRefresh?: () => void;
-	/** 用量查询链路：DSH 会话（目录 provider 是 DSH route 名）传 "dsh"，缺省 pi。 */
-	backend?: UsageProbeBackend;
-	/** 最近使用的供应商 ID 列表（最新在前）：已用过的分组排最前，未用过的按内置置顶+字母序。 */
-	recentProviders?: string[];
-	/** 供应商自定义顺序（模型页排序结果，后端对应数组由宿主选择）：列出的严格按此展示且不再被最近使用覆盖。 */
-	providerOrder?: string[];
-	/** 用户隐藏的供应商 key 列表（Pi 模型页眼睛开关）；Pi 后端按 provider 过滤，DSH 不生效。 */
-	hiddenProviders?: string[];
-	/** 用户隐藏的模型列表（格式："provider/modelId"）；Pi 后端过滤单个模型。 */
-	hiddenModels?: string[];
-	/** 切换模型隐藏状态（可直接在模型选择器中隐藏模型，也可在折叠区恢复显示）。 */
-	onToggleHideModel?: (provider: string, modelId: string) => void;
-}) {
-	const currentModelKey = props.current?.provider && props.current?.modelId ? `${props.current.provider}/${props.current.modelId}` : undefined;
-	const favoritesSet = new Set(props.favoriteModels ?? []);
-	// 隐藏开关：Pi 后端按 provider 与 model 过滤（DSH 的 route 名不参与隐藏列表）；
-	// 过滤后收藏/分组/搜索都基于可见模型，隐藏供应商与隐藏模型不出现在主选择区。
-	const hiddenProviderSet = new Set(props.backend === "dsh" ? [] : (props.hiddenProviders ?? []));
-	const hiddenModelSet = new Set(props.backend === "dsh" ? [] : (props.hiddenModels ?? []));
-	const visibleModels: AvailableModel[] = [];
-	const hiddenModelList: AvailableModel[] = [];
-	for (const model of props.models) {
-		if (hiddenProviderSet.has(model.provider)) continue;
-		const key = `${model.provider}/${model.id}`;
-		if (hiddenModelSet.has(key)) {
-			hiddenModelList.push(model);
-		} else {
-			visibleModels.push(model);
-		}
-	}
-
-	// 收藏列表（从全部模型中提取，不移除原供应商分组下的显示）
-	const favorites: AvailableModel[] = visibleModels.filter((model) => favoritesSet.has(`${model.provider}/${model.id}`));
-	favorites.sort((a, b) => {
-		const ap = a.provider ?? "";
-		const bp = b.provider ?? "";
-		if (ap !== bp) return ap.localeCompare(bp);
-		return (a.name ?? a.id).localeCompare(b.name ?? b.id);
-	});
-
-	// 全量模型按供应商分组（收藏模型也保留在原分组）；
-	// 搜索交给 cmdk（item 的 value/keywords 同时覆盖 name/id/provider）
-	const groupedModels = groupModelsByProvider(visibleModels);
-	// 供应商分组顺序：用户自定义顺序优先（严格按拖拽结果），其余仍按最近使用 → 内置置顶 → 字母序；
-	// 'other' 是白名单外供应商的兜底组，顺序保持最后。
-	const sortedProviders = orderProviderGroups(Object.keys(groupedModels), props.recentProviders, props.providerOrder);
-
-	// 默认展开集合（「当前选中模型可见」驱动）：只展开收藏栏 + 当前模型所在提供商，
-	// 其余提供商折叠；无收藏且无当前模型时回退第一个提供商。折叠是派生状态，
-	// 模型目录/收藏异步到达后，未覆盖的分组会自动按新集合生效，不再有“打开时全展开”的时序问题。
-	const defaultExpandedIds = new Set(
-		computeModelPickerDefaultExpanded({
-			favorites,
-			current: props.current,
-			providers: sortedProviders,
-		}),
-	);
-	// 主体状态：加载中 / 失败或空态引导 / 模型列表（纯函数，见 sessionPickerOptions）。
-	const bodyState = resolveModelPickerBody({
-		modelCount: props.models.length,
-		report: props.report,
-		loading: props.loading,
-	});
-
-	// 供应商用量行（cc-switch inline）：打开选择器时批量 TTL 去重查询，供应商标题行右侧
-	// 显示彩色剩余/百分比；查不到（未启用/不支持/失败/查询中）的分组保持干净不渲染。
-	// backend 按会话后端透传（DSH 目录的 provider 是 route 名，配置/凭据在 dsh 链路）。
-	const batchRefreshUsage = useProviderUsageBatchRefresh();
-	const providerKey = sortedProviders.join("\n");
-	useEffect(() => {
-		if (providerKey) batchRefreshUsage(providerKey.split("\n"), props.backend);
-	}, [providerKey, batchRefreshUsage, props.backend]);
-
-	const renderModelRow = (model: AvailableModel, valueOverride?: string) => {
-		const modelKey = `${model.provider}/${model.id}`;
-		const selected = modelKey === currentModelKey;
-		const favorited = favoritesSet.has(modelKey);
-		// cmdk 用 CommandItem.value 作为选中态标识；同一模型在收藏栏和普通提供商
-		// 分组各渲染一行时，value 必须唯一，否则鼠标悬停/键盘选中会让两行同时高亮。
-		// data-picker-value 仍保留模型 key，供面板“当前模型滚动定位”使用。
-		const itemValue = valueOverride ?? modelKey;
-		// 行文案：provider/名称，单行（原双行「name + provider/id」视觉太重，id 收进 tooltip）。
-		const labels = modelRowLabel(model);
-		return (
-			<CommandItem key={itemValue} value={itemValue} data-picker-value={modelKey} keywords={[model.name ?? "", model.id, model.provider, modelKey]} onSelect={() => props.onPick(model)} className="group min-h-9 items-center gap-2 rounded-md px-2.5 py-1">
-				{/* 收藏/取消收藏按钮：填充星为收藏，空心为未收藏 */}
-				{props.onToggleFavorite && (
-					<button
-						type="button"
-						className={`grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground${favorited ? " text-amber-500" : ""}`}
-						title={favorited ? t("app.modelUnfavorite") : t("app.modelFavorite")}
-						aria-label={favorited ? t("app.modelUnfavorite") : t("app.modelFavorite")}
-						onClick={(e) => {
-							e.stopPropagation();
-							props.onToggleFavorite?.(model.provider, model.id);
-						}}
-					>
-						<Star size={14} strokeWidth={1.8} fill={favorited ? "currentColor" : "none"} />
-					</button>
-				)}
-				<span className="min-w-0 flex-1 truncate font-mono text-control font-medium text-foreground" title={`${modelRowName(model)} · ${modelKey}`}>
-					{labels}
-				</span>
-				{/* 隐藏模型操作按钮：悬停时显示，点击将模型放入隐藏列表 */}
-				{props.onToggleHideModel && !favorited && (
-					<button
-						type="button"
-						className="invisible grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground opacity-60 transition-colors hover:bg-accent hover:text-foreground hover:opacity-100 group-hover:visible"
-						title={t("app.modelHide")}
-						aria-label={t("app.modelHide")}
-						onClick={(e) => {
-							e.stopPropagation();
-							props.onToggleHideModel?.(model.provider, model.id);
-						}}
-					>
-						<EyeOff size={13} strokeWidth={1.8} />
-					</button>
-				)}
-				{selected ? <Check size={15} className="ml-auto shrink-0 text-primary" aria-hidden="true" /> : null}
-			</CommandItem>
-		);
-	};
-
+export function ModelPicker(
+	props: ModelPickerSource & {
+		onClose: () => void;
+		onPick: (model: AvailableModel) => void;
+		onToggleFavorite?: (provider: string, modelId: string) => void;
+		onToggleHideModel?: (provider: string, modelId: string) => void;
+	},
+) {
+	// 列表主体与底栏二级浮层共用 ModelPickerBody：收藏星/隐藏眼/选中勾/用量 trailing
+	// 只有一处实现；本组件只提供 Dialog 外壳（标题栏 + 搜索 + 折叠动作）。
+	const view = resolveModelPickerView(props);
 	return (
 		<CommandPickerDialog
 			title={t("app.modelPickerTitle")}
@@ -867,12 +736,12 @@ export function ModelPicker(props: {
 			className="model-picker sm:max-w-[min(720px,calc(100vw-32px))]"
 			searchPlaceholder={t("app.modelPickerSearch")}
 			emptyLabel={t("app.modelPickerEmpty")}
-			value={currentModelKey}
+			value={currentModelKeyOf(props)}
 			showGroupActions
-			defaultExpandedIds={defaultExpandedIds}
+			defaultExpandedIds={view.defaultExpandedIds}
 			// 精确子串搜索：cmdk 默认 fuzzy 会让 1-2 字符词命中全部 tokendance 模型（见
 			// modelPickerSearchFilter 注释）；其他选择器（思考级别/预设）仍用默认 fuzzy。
-			filter={modelPickerSearchFilter}
+			filter={modelPickerFilter}
 			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
 			headerAction={
 				props.onRefresh ? (
@@ -882,52 +751,7 @@ export function ModelPicker(props: {
 				) : undefined
 			}
 		>
-			{bodyState === "loading" ? (
-				<ModelListLoadingState />
-			) : bodyState === "guide" && props.report ? (
-				<ModelListStatusGuide report={props.report} refreshing={props.refreshing} onRefresh={props.onRefresh} />
-			) : (
-				<>
-					{favorites.length > 0 && (
-						<CommandPickerGroup id="favorites" label={t("app.modelFavorites")} count={favorites.length}>
-							{favorites.map((model) => renderModelRow(model, `favorites/${model.provider}/${model.id}`))}
-						</CommandPickerGroup>
-					)}
-					{sortedProviders.map((provider) => (
-						<CommandPickerGroup id={`provider:${provider}`} key={provider} label={provider} count={groupedModels[provider].length} countText={t("config.count.models", { count: groupedModels[provider].length })} trailing={<ProviderUsageInline provider={provider} variant="row" backend={props.backend} />}>
-							{groupedModels[provider].map((model) => renderModelRow(model))}
-						</CommandPickerGroup>
-					))}
-					{hiddenModelList.length > 0 && props.onToggleHideModel && (
-						<CommandPickerGroup id="hidden-models" label={t("app.modelHiddenSection")} count={hiddenModelList.length} countText={t("app.modelHiddenCount", { count: hiddenModelList.length })}>
-							{hiddenModelList.map((model) => {
-								const modelKey = `${model.provider}/${model.id}`;
-								// 与可见行同一套文案规则（provider/名称，单行），只是整体弱化显示。
-								const labels = modelRowLabel(model);
-								return (
-									<CommandItem key={`hidden/${modelKey}`} value={`hidden/${modelKey}`} data-picker-value={modelKey} keywords={[model.name ?? "", model.id, model.provider, modelKey]} className="group min-h-9 items-center gap-2 rounded-md px-2.5 py-1 text-muted-foreground" onSelect={() => props.onPick(model)}>
-										<span className="min-w-0 flex-1 truncate font-mono text-control opacity-70" title={`${modelRowName(model)} · ${modelKey}`}>
-											{labels}
-										</span>
-										<button
-											type="button"
-											className="grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-											title={t("app.modelHiddenRestore")}
-											aria-label={t("app.modelHiddenRestore")}
-											onClick={(e) => {
-												e.stopPropagation();
-												props.onToggleHideModel?.(model.provider, model.id);
-											}}
-										>
-											<Eye size={14} strokeWidth={1.8} />
-										</button>
-									</CommandItem>
-								);
-							})}
-						</CommandPickerGroup>
-					)}
-				</>
-			)}
+			<ModelPickerBody {...props} view={view} />
 		</CommandPickerDialog>
 	);
 }

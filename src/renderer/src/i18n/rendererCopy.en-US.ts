@@ -619,6 +619,17 @@ export const enUS: Record<TranslationKey, string> = {
 	"app.modelPickerEmpty": "No matching models",
 	"app.modelPickerSearch": "Search models, provider, or ID",
 	"app.modelPickerTitle": "Select model",
+	// Composer model chip's two-level popover (level 1: effort pill + slider; level 2: model list)
+	"composerEffort.modelsTitle": "Select model",
+	"composerEffort.searchPlaceholder": "Search models, provider, or ID",
+	"composerEffort.favorites": "Favorites",
+	"composerEffort.balance": "Balance",
+	"composerEffort.expandAll": "Expand all",
+	"composerEffort.collapseAll": "Collapse all",
+	"composerEffort.modelCount": "{count} models",
+	"composerEffort.effortLabel": "Reasoning effort",
+	// Context spend pop animation (-N tok flying left from the ring); {tokens} is pre-grouped
+	"composerEffort.spendTokens": "-{tokens} tok",
 	"app.modelPickerRefresh": "Refresh model list",
 	"app.modelPickerRefreshing": "Refreshing…",
 	"app.modelPickerRetry": "Refresh and retry",

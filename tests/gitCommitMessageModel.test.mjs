@@ -17,6 +17,8 @@ const fileSortControl = readFileSync("src/renderer/src/components/session/FileSo
 const composerComponents = readFileSync("src/renderer/src/components/session/ComposerComponents.tsx", "utf8");
 const projectEmptyState = readFileSync("src/renderer/src/components/session/ProjectEmptyState.tsx", "utf8");
 const commandPicker = readFileSync("src/renderer/src/components/ui-shadcn/command-picker.tsx", "utf8");
+/** 模型列表主体（收藏栏/行渲染/选中态）：Dialog 与底栏二级浮层共用一份。 */
+const modelPickerBody = readFileSync("src/renderer/src/components/session/ModelPickerBody.tsx", "utf8");
 const i18n = [readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8"), readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8"), readFileSync("src/shared/i18n/mainProcessCopy.ts", "utf8")].join("\n");
 
 test("Git summary stores an explicit provider and model without a legacy fallback", () => {
@@ -45,8 +47,9 @@ test("File sorting leaves hover state to Radix DropdownMenu", () => {
 });
 
 test("Shared model picker keeps one model line and supports collapse and selected-item positioning", () => {
-	assert.match(composerComponents, /<CommandPickerGroup id=\"favorites\"/);
-	assert.doesNotMatch(composerComponents, /picker-palette-label.*model\.name/);
+	// 列表主体（收藏栏/行渲染/选中态）已抽到 ModelPickerBody：Dialog 与底栏二级浮层共用一份。
+	assert.match(modelPickerBody, /<CommandPickerGroup id=\"favorites\"/);
+	assert.doesNotMatch(modelPickerBody, /picker-palette-label.*model\.name/);
 	assert.match(commandPicker, /showGroupActions/);
 	// 折叠策略已抽为纯函数：分组展开态经 resolveGroupExpanded（defaultExpandedIds +
 	// 用户 toggle 的 selection 合成），批量展开/收起走 applyPickerGroupAction。
@@ -56,7 +59,8 @@ test("Shared model picker keeps one model line and supports collapse and selecte
 	assert.match(commandPicker, /resolveGroupExpanded\(\{\s*selection,/);
 	assert.match(commandPicker, /toggleGroup\(props\.id\)/);
 	assert.match(commandPicker, /aria-expanded=\{expanded\}/);
-	assert.match(composerComponents, /value=\{currentModelKey\}/);
+	assert.match(composerComponents, /value=\{currentModelKeyOf\(props\)\}/);
+	assert.match(modelPickerBody, /const selected = modelKey === currentModelKeyOf\(props\)/);
 	assert.match(composerComponents, /value: props\.composerAgentMode/);
 	assert.match(composerComponents, /value=\{props\.current\}/);
 	assert.match(commandPicker, /search\.trim\(\) \? <CommandEmpty/);

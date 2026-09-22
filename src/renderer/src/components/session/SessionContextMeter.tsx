@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
 import { useSetAtom } from "jotai";
@@ -11,7 +11,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
 import { formatPercent } from "./TimelineFormat";
-import { contextRingColorVars, contextRingLevelFromUsed } from "../../utils/contextSpend";
+import { contextLeftPercent, contextLevelAttribute, contextRingAngleDeg, contextRingLevel, showContextWarnArc, CONTEXT_WARN_ZONE_START_DEG } from "../../utils/contextSpend";
 import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
 
 /**
@@ -37,16 +37,17 @@ import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
  *   面板内容降级为「上下文数据暂不可用」，不再整环隐藏。
  * - 命中率/输入输出行按数据存在性渲染，缺字段不占位。
  *
- * 颜色即状态（2026-09）：弧身改用双色状态渐变（normal 蓝紫 / 预警黄橙 / 危险橙红），
- * 分档基于**剩余**占用（`contextRingLevelFromUsed(percent)` = `contextRingLevel(100 - percent)`）；
- * 弧长仍表示**已用**（与 tooltip「上下文已用 X%」、面板同口径）——两者方向一致：环越满越红。
+ * 颜色即状态（2026-09）：环身用 19px 双色 conic-gradient 甜甜圈
+ * （normal 蓝紫 / 预警黄橙 / 危险橙红），**弧长画「剩余」**（原型
+ * `--ring-angle = left * 3.6`）——消耗时环变短，剩余 ≤20% 时环外浮出斜线预警弧。
+ * 环外右侧常驻百分比数字（也是剩余口径）。
  * 新消耗时从圆环向左飞出 `-N tok`（队列串行，见 useContextSpendEffects）：
  * 同一读数重复上报、压缩后回落、会话切换均不触发。
  */
 
-/** 圆环几何：14px viewBox、2px 描边（dsh 逐字节移植）。 */
-const RADIUS = 5.5;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+/** 圆环几何（19px 外径 / 3px 环宽 / 甜甜圈内孔 13px）定义在 tailwind.css 的
+ *  `ctx-ring` utility 里：conic-gradient 角度变量 + color-mix 描边 + mask 挖孔
+ *  无法用原子类表达，因此几何与色值一并归 CSS；TS 侧只提供角度与分档。 */
 /** 两段图例色：对话=蓝、系统+工具=紫（dsh ROWS 的 messages/tools 色系）。 */
 const COLOR_CONVERSATION = "var(--color-context-conversation, #2563eb)";
 const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250))";
@@ -164,9 +165,7 @@ export function SessionContextMeter(props: {
 }) {
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLSpanElement | null>(null);
-	/** 环身双色渐变的 SVG gradient id：同页多个圆环（分屏）必须唯一，
-	 *  否则后挂载的实例会覆盖前面的渐变定义。 */
-	const ringGradientId = `ctx-ring-${useId().replace(/[^a-zA-Z0-9-]/g, "")}`;
+	/** 环身用 CSS 变量（--ring-angle 等）；同页多个圆环互不干扰，不需唯一 id。 */
 	/** 面板 fixed 定位：相对 viewport 的 {left, top}；null = 尚未定位（首帧隐藏） */
 	const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -286,9 +285,11 @@ export function SessionContextMeter(props: {
 					return parts.filter((part) => part.tokens > 0).map((part) => ({ key: part.key, color: part.color, width: Math.min(100, (percent * part.tokens) / breakdownTotal) }));
 				})()
 			: undefined;
-	// 圆环颜色即状态：分档基于**剩余**占用（弧长仍表示已用，与 tooltip/面板同口径）。
-	const ringLevel = contextRingLevelFromUsed(context?.percent ?? 0);
-	const ringColors = contextRingColorVars(ringLevel);
+	// 圆环颜色/弧长都以**剩余**为准（原型语义）：runtime 上报的是已用，先换算。
+	const leftPercent = contextLeftPercent(context?.percent ?? 0);
+	const ringLevel = contextRingLevel(leftPercent);
+	const ringAngle = contextRingAngleDeg(leftPercent);
+	const warnArc = showContextWarnArc(leftPercent);
 	// 扣血动画：相邻两帧的正向增量才触发（重复读数/压缩回落/会话切换都不触发）。
 	const spend = useContextSpendEffects({ sessionId: props.sessionId, tokens: props.state?.contextTokens });
 	const showCompact = props.onCompact !== undefined;
@@ -320,7 +321,10 @@ export function SessionContextMeter(props: {
 					<button
 						ref={triggerRef}
 						type="button"
-						className="grid size-7 flex-none place-items-center rounded-full text-text-tertiary transition-colors hover:bg-muted/60"
+						/* 容器带分档 class（驱动双色变量 + 边框）+ data-level；
+						   环与数字作为子元素，padding 与原型一致（0 8px 0 5px）。 */
+						className={`ctx-ring-host flex h-7 flex-none items-center gap-1.5 rounded-md border border-transparent bg-transparent pt-px pr-2 pb-px pl-[5px] transition-colors hover:bg-muted/60`}
+						data-level={contextLevelAttribute(ringLevel)}
 						aria-label={reading}
 						aria-haspopup="dialog"
 						aria-expanded={open}
@@ -328,19 +332,15 @@ export function SessionContextMeter(props: {
 							setOpen((value) => !value);
 						}}
 					>
-						<svg viewBox="0 0 14 14" width="14" height="14" aria-hidden="true" className={spend.spendLabel !== null ? "animate-context-pulse" : undefined}>
-							{/* 双色状态渐变：14px SVG 环无法用 conic-gradient 描边，
-							    改用与环同构的线性渐变（起点 --ctx-ok/--ctx-warn/--ctx-warn2 →
-							    终点 --ctx-ok2/--ctx-warn2/--ctx-danger），颜色即状态的语义不变。 */}
-							<defs>
-								<linearGradient id={ringGradientId} x1="0" y1="0" x2="14" y2="14" gradientUnits="userSpaceOnUse">
-									<stop offset="0%" stopColor={ringColors.a} />
-									<stop offset="100%" stopColor={ringColors.b} />
-								</linearGradient>
-							</defs>
-							<circle className="fill-none" cx="7" cy="7" r={RADIUS} strokeWidth={2} stroke="var(--ctx-track)" />
-							<circle className="fill-none [stroke-linecap:round]" cx="7" cy="7" r={RADIUS} strokeWidth={2} stroke={`url(#${ringGradientId})`} strokeDasharray={`${(CIRCUMFERENCE * percent) / 100} ${CIRCUMFERENCE}`} transform="rotate(-90 7 7)" />
-						</svg>
+						{/* 19px 双色 conic-gradient 甜甜圈：弧长 = **剩余**（--ring-angle）
+						   颜色即状态；消耗时环变短，≤20% 时环外浮出斜线预警弧。 */}
+						<span data-testid="session-context-ring" aria-hidden="true" className={`ctx-ring${spend.spendLabel !== null ? " animate-context-pulse" : ""}`} style={{ "--ring-angle": `${ringAngle}deg`, "--zone-start": `${CONTEXT_WARN_ZONE_START_DEG}deg` } as CSSProperties}>
+							<span data-warn={warnArc ? "true" : "false"} className="ctx-ring-warnarc" />
+						</span>
+						{/* 数字在环**外右侧**（★ 不放进环内）：剩余百分比 */}
+						<span data-testid="session-context-percent" className="ctx-ring-pct">
+							{available ? `${formatPercent(leftPercent)}%` : "--"}
+						</span>
 					</button>
 				</TooltipTrigger>
 				<TooltipContent>{reading}</TooltipContent>

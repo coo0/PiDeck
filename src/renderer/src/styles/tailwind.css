@@ -322,6 +322,118 @@
   }
 }
 
+/* ── 上下文圆环（composer 发送按钮旁的状态指示）─────────────────────
+ * 19px 双色 conic-gradient 甜甜圈：**颜色即状态**（normal 蓝紫 / 预警黄橙 /
+ * 危险橙红），弧长画**剩余**（原型 `--ring-angle = left * 3.6`）；剩余 ≤20%
+ * 时环外浮出斜线预警弧。
+ *
+ * 为何用 @layer utilities 而不是 @utility：这里必须用嵌套选择器
+ * （`&::after` 挖甜甜圈、`[data-level=…]` 分档、`[data-warn]` 显示预警弧），
+ * 而 Tailwind 的 `@utility` **不会展开嵌套的 `&` 规则**——它们会被原样写进
+ * 产物，浏览器不认、静默失效（实测：环不变甜甜圈、五档全灰、预警弧永不出现）。
+ * `@layer utilities` 参与 Tailwind 的嵌套处理，产物是真实 CSS。
+ * 色值仍全部取自 foundation 的 --ctx-* 语义 token（不新建调色板）。
+ * 分档靠容器的 data-level（见 utils/contextSpend.ts 的 contextLevelAttribute）。 */
+@layer utilities {
+  .ctx-ring {
+    position: relative;
+    width: 19px;
+    height: 19px;
+    flex: none;
+    border-radius: 50%;
+    /* 已消耗部分为轨道色，剩余部分是双色渐变：环越短 = 剩余越少 */
+    background: conic-gradient(from -90deg, var(--ring-a) 0deg, var(--ring-b) var(--ring-angle), var(--ctx-track) var(--ring-angle) 360deg);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring-a) 22%, transparent);
+    transition: box-shadow 0.2s ease;
+  }
+
+  /* 挖空成甜甜圈：内孔填面板底色（19 - 3*2 = 13px 内径） */
+  .ctx-ring::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border-radius: 50%;
+    background: var(--color-bg-panel);
+  }
+
+  /* hover 光晕（同色 26%）：五档共用一条规则 */
+  .ctx-ring-host:hover .ctx-ring {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-a) 26%, transparent);
+  }
+
+  /* 剩余 ≤20% 的压缩预警弧：环外扩 3px 的一圈斜线条纹。
+   * 遮罩内半径 9.5px = 原环半径（19/2），保证斜线只画在环身之外那一圈。 */
+  .ctx-ring-warnarc {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    background: conic-gradient(from -90deg, transparent 0deg, transparent var(--zone-start), var(--hatch-b) var(--zone-start), var(--hatch-a) 360deg);
+    -webkit-mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
+    mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
+  }
+
+  .ctx-ring-warnarc[data-warn="true"] {
+    opacity: 1;
+  }
+
+  /* 分档 → 双色变量 + 容器边框（明暗由 token 自动跟随）。
+   * 用一个类 + [data-level] 而不是五个 ctx-level-* 类：Tailwind 只会在扫到
+   * **字面量**类名时按需生成 @utility，而分档是运行时算出来的
+   * （`ctx-level-${level}`），拼出来的类名永远扫不到 → CSS 不生成、环变全灰。
+   * 属性选择器既是原型自身的写法（.ctx[data-level="notice"]），也让字面量只有一处。 */
+  .ctx-ring-host[data-level="normal"] {
+    --ring-a: var(--ctx-ok);
+    --ring-b: var(--ctx-ok2);
+    border-color: transparent;
+  }
+
+  .ctx-ring-host[data-level="notice"] {
+    --ring-a: var(--ctx-warn);
+    --ring-b: var(--ctx-warn2);
+    border-color: color-mix(in srgb, var(--ctx-warn) 30%, transparent);
+  }
+
+  .ctx-ring-host[data-level="warn"] {
+    --ring-a: var(--ctx-warn);
+    --ring-b: var(--ctx-warn2);
+    border-color: color-mix(in srgb, var(--ctx-warn2) 48%, transparent);
+  }
+
+  .ctx-ring-host[data-level="danger"] {
+    --ring-a: var(--ctx-warn2);
+    --ring-b: var(--ctx-danger);
+    border-color: color-mix(in srgb, var(--ctx-danger) 50%, transparent);
+  }
+
+  .ctx-ring-host[data-level="critical"] {
+    --ring-a: var(--ctx-warn2);
+    --ring-b: var(--ctx-danger);
+    border-color: color-mix(in srgb, var(--ctx-danger) 50%, transparent);
+  }
+
+  /* 圆环外右侧的数字：等宽 + tabular-nums（宽度不随数值抖动）。 */
+  .ctx-ring-pct {
+    font-family: var(--font-family-mono);
+    font-size: var(--font-size-caption);
+    font-weight: 700;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-text-primary);
+  }
+
+  .ctx-ring-host[data-level="notice"] .ctx-ring-pct,
+  .ctx-ring-host[data-level="warn"] .ctx-ring-pct {
+    color: var(--ctx-warn);
+  }
+
+  .ctx-ring-host[data-level="danger"] .ctx-ring-pct,
+  .ctx-ring-host[data-level="critical"] .ctx-ring-pct {
+    color: var(--ctx-danger);
+  }
+}
+
 /* ── 思考扫光动画（deepseek-harness ReasoningRow 同款）─────────────────
  * 折叠态思考单行的「流式光带」：仅思考仍在流式（running）时存在，结束后消失，
  * 与状态完全同步，避免旧跑马灯「思考结束还在滚」的问题。 */

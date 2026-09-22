@@ -141,17 +141,27 @@ test("cache-hit display sites share one formatter (no Math.round / toFixed(0) dr
 	assert.doesNotMatch(surfaces, /\$\{state\.cacheHitPercent\.toFixed\(1\)\}%/);
 });
 
-test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-start fill", () => {
+test("meter ring: 19px conic-gradient 甜甜圈，弧长画「剩余」（原型定稿几何）", () => {
 	const source = meterSource();
-	// 几何常量与 svg 结构（dsh ContextMeter 逐字节移植）
-	assert.match(source, /const RADIUS = 5\.5/);
-	assert.match(source, /CIRCUMFERENCE = 2 \* Math\.PI \* RADIUS/);
-	assert.match(source, /viewBox="0 0 14 14" width="14" height="14"/);
-	// 格式化会给模板内的算术补括号，断言只锁「percent/100 与 CIRCUMFERENCE 两段」的语义。
-	assert.match(source, /strokeDasharray=\{`\$\{[\s\S]{0,12}CIRCUMFERENCE \* percent[\s\S]{0,12}\} \$\{CIRCUMFERENCE\}`\}/);
-	assert.match(source, /transform="rotate\(-90 7 7\)"/);
-	// 28px 圆形点击区（与附件按钮同族）+ 无 capacity 时渲染 0% 占位环常驻
-	assert.match(source, /size-7 flex-none place-items-center rounded-full/);
+	const css = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
+	// 组件侧：环身带 ctx-ring + 分档容器，把角度写成 CSS 变量
+	assert.match(source, /className=\{`ctx-ring\$\{spend\.spendLabel !== null \? " animate-context-pulse" : ""\}`\}/);
+	assert.match(source, /className=\{`ctx-ring-host flex h-7/);
+	// 弧长 = 剩余（原型第 616 行：p * 3.6）；数字也是剩余口径
+	assert.match(source, /contextLeftPercent\(context\?\.percent \?\? 0\)/);
+	assert.match(source, /contextRingAngleDeg\(leftPercent\)/);
+	assert.match(source, /"--ring-angle": `\$\{ringAngle\}deg`/);
+	// 旧 14px SVG 描边环已彻底移除
+	assert.doesNotMatch(source, /viewBox="0 0 14 14"/);
+	assert.doesNotMatch(source, /const RADIUS = 5\.5/);
+	assert.doesNotMatch(source, /CIRCUMFERENCE/);
+	// 几何与色值归 CSS：19px + conic-gradient（角度变量驱动弧长）
+	assert.match(css, /\.ctx-ring \{/);
+	assert.match(css, /width: 19px;/);
+	assert.match(css, /background: conic-gradient\(from -90deg, var\(--ring-a\) 0deg, var\(--ring-b\) var\(--ring-angle\), var\(--ctx-track\) var\(--ring-angle\) 360deg\);/);
+	// 甜甜圈：内孔 inset 3px 填面板底色
+	assert.match(css, /\.ctx-ring::after \{[\s\S]{0,120}?inset: 3px;[\s\S]{0,120}?background: var\(--color-bg-panel\);/);
+	// 无 capacity 时渲染占位环常驻
 	assert.match(source, /const percent = context\?\.percent \?\? 0;/);
 	assert.match(source, /t\("sessionContext\.unavailable"\)/);
 	// 打开期间挂 document 监听（外点/Escape 关闭）
@@ -159,21 +169,57 @@ test("meter ring follows the dsh geometry: 14px viewBox, r=5.5, 2px stroke, top-
 	assert.match(source, /addEventListener\("keydown", onKeyDown\)/);
 });
 
+test("meter ring styles live in @layer utilities, not @utility（@utility 不展开嵌套 &）", () => {
+	const css = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
+	// 回归：这四条规则都依赖嵌套选择器（&::after / [data-level] / [data-warn]）。
+	// Tailwind 的 @utility 会把嵌套的 & 原样写进产物，浏览器不认、静默失效——
+	// 实测后果：环不变甜甜圈、五档全灰、预警弧永不出现（正是用户报的「没按文档改」）。
+	// 必须放在 @layer utilities（参与嵌套处理，产物是真实 CSS）。
+	assert.match(css, /@layer utilities \{/);
+	assert.match(css, /\.ctx-ring \{/);
+	assert.match(css, /\.ctx-ring::after \{/);
+	assert.match(css, /\.ctx-ring-warnarc\[data-warn="true"\] \{/);
+	assert.match(css, /\.ctx-ring-host\[data-level="critical"\] \{/);
+	// 不得再退回 @utility ctx-ring*
+	assert.doesNotMatch(css, /@utility ctx-ring/);
+});
+
+test("meter ring: 环外右侧数字 + ≤20% 预警斜线弧（原型定稿）", () => {
+	const source = meterSource();
+	const css = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
+	// 数字在环外右侧（不是环内），带 data-testid 便于取证
+	assert.match(source, /data-testid="session-context-percent" className="ctx-ring-pct"/);
+	assert.match(css, /\.ctx-ring-pct \{[\s\S]{0,220}?font-variant-numeric: tabular-nums;/);
+	// 预警弧：剩余 ≤20%，inset -3px、遮罩内半径 9.5px（= 19/2）、zone-start 72deg
+	assert.match(source, /showContextWarnArc\(leftPercent\)/);
+	assert.match(source, /<span data-warn=\{warnArc \? "true" : "false"\} className="ctx-ring-warnarc" \/>/);
+	assert.match(source, /"--zone-start": `\$\{CONTEXT_WARN_ZONE_START_DEG\}deg`/);
+	assert.match(css, /\.ctx-ring-warnarc \{[\s\S]{0,400}?inset: -3px;/);
+	assert.match(css, /mask: radial-gradient\(circle, transparent 0 9\.5px, #000 9\.5px\);/);
+	assert.match(css, /\.ctx-ring-warnarc\[data-warn="true"\] \{[\s\S]{0,40}?opacity: 1;/);
+});
+
 test("meter ring colors encode state via ctx semantic tokens (no second palette)", () => {
 	const source = meterSource();
-	// 分档与双色都来自纯函数（utils/contextSpend），组件不内联色值：
-	// 颜色即状态 = normal 蓝紫 / 预警黄橙 / 危险橙红。
-	assert.match(source, /contextRingLevelFromUsed\(context\?\.percent \?\? 0\)/);
-	assert.match(source, /contextRingColorVars\(ringLevel\)/);
-	// 环底用 --ctx-track，环身用渐变（stop 引用 contextRingColorVars 的 a/b）
-	assert.match(source, /stroke="var\(--ctx-track\)"/);
-	assert.match(source, /stopColor=\{ringColors\.a\}/);
-	assert.match(source, /stopColor=\{ringColors\.b\}/);
-	// 旧的灰色描边（border/tertiary）彻底消失——灰环在白/深底上都接近背景，读不出状态
+	const css = readFileSync("src/renderer/src/styles/tailwind.css", "utf8");
+	// 分档来自纯函数（utils/contextSpend），组件只把它写进 data-level；
+	// 双色变量与边框在 CSS 里按 [data-level] 取 --ctx-* 语义 token。
+	assert.match(source, /contextRingLevel\(leftPercent\)/);
+	assert.match(source, /data-level=\{contextLevelAttribute\(ringLevel\)\}/);
+	// 五档都在 CSS 里有定义（一个类 + data-level，避免动态类名扫不到导致环变灰）
+	for (const level of ["normal", "notice", "warn", "danger", "critical"]) {
+		assert.ok(css.includes(`.ctx-ring-host[data-level="${level}"] {`), `CSS 缺少 ${level} 档`);
+	}
+	// 双色映射与 dev 文档 §2.1 一致
+	assert.match(css, /\.ctx-ring-host\[data-level="normal"\] \{[\s\S]{0,120}?--ring-a: var\(--ctx-ok\);[\s\S]{0,80}?--ring-b: var\(--ctx-ok2\);/);
+	assert.match(css, /\.ctx-ring-host\[data-level="notice"\] \{[\s\S]{0,120}?--ring-a: var\(--ctx-warn\);[\s\S]{0,80}?--ring-b: var\(--ctx-warn2\);/);
+	assert.match(css, /\.ctx-ring-host\[data-level="critical"\] \{[\s\S]{0,120}?--ring-a: var\(--ctx-warn2\);[\s\S]{0,80}?--ring-b: var\(--ctx-danger\);/);
+	// 数字色随档位（normal 用主文字色，预警/危险用状态色）
+	assert.match(css, /\.ctx-ring-host\[data-level="notice"\] \.ctx-ring-pct,[\s\S]{0,80}?\.ctx-ring-host\[data-level="warn"\] \.ctx-ring-pct \{[\s\S]{0,60}?color: var\(--ctx-warn\);/);
+	assert.match(css, /\.ctx-ring-host\[data-level="danger"\] \.ctx-ring-pct,[\s\S]{0,80}?\.ctx-ring-host\[data-level="critical"\] \.ctx-ring-pct \{[\s\S]{0,60}?color: var\(--ctx-danger\);/);
+	// 旧的灰环描边（border/tertiary）不得回归
 	assert.doesNotMatch(source, /stroke-\[var\(--color-border\)\]/);
 	assert.doesNotMatch(source, /stroke-\[var\(--color-text-tertiary\)\]/);
-	// 同页多个圆环（分屏）的渐变 id 必须唯一，否则互相覆盖
-	assert.match(source, /const ringGradientId = `ctx-ring-\$\{useId\(\)\.replace\(/);
 });
 
 test("meter mounts the serial spend animation from the shared hook", () => {

@@ -51,15 +51,37 @@ export function contextRingLevel(leftPercent: number): ContextRingLevel {
 }
 
 /**
- * 已用百分比 → 圆环分档。
+ * 已用百分比 → 剩余百分比。
  *
- * 分档语义是「剩余」（contextRingLevel），而圆环弧长 / tooltip / 面板都是「已用」；
- * 本函数收口取反，避免各调用点各自写 `100 - percent` 造成两处口径分叉。
+ * 原型里圆环的弧长、数字、tooltip 都以**剩余**为准（`state.left = 78.4`
+ * → `--ring-angle: 282deg`），而 runtime 上报的是**已用**（`contextPercent`）。
+ * 本函数是两者之间的唯一换算点，避免各处散写 `100 - percent`。
  */
-export function contextRingLevelFromUsed(usedPercent: number): ContextRingLevel {
-	if (!Number.isFinite(usedPercent)) return "normal";
-	return contextRingLevel(100 - usedPercent);
+export function contextLeftPercent(usedPercent: number): number {
+	if (!Number.isFinite(usedPercent)) return 100;
+	return Math.max(0, Math.min(100, 100 - usedPercent));
 }
+
+/**
+ * 剩余百分比 → conic-gradient 角度（从 12 点方向顺时针）。
+ * 原型：`--ring-angle = left * 3.6`（78.4 → 282deg）。
+ * **画的是剩余**：消耗时环变短，与 tooltip 的「剩余」口径一致。
+ */
+export function contextRingAngleDeg(leftPercent: number): number {
+	if (!Number.isFinite(leftPercent)) return 0;
+	return Math.max(0, Math.min(100, leftPercent)) * 3.6;
+}
+
+/** 压缩预警阈值（剩余百分比）：跌破它时圆环外圈浮出斜线弧。 */
+export const CONTEXT_WARN_LEFT_PERCENT = 20;
+
+/** 是否展示压缩预警弧（剩余 ≤ 20%）。 */
+export function showContextWarnArc(leftPercent: number): boolean {
+	return Number.isFinite(leftPercent) && leftPercent <= CONTEXT_WARN_LEFT_PERCENT;
+}
+
+/** 预警弧的起始角度（原型 `--zone-start: 72deg` = 20 * 3.6）。 */
+export const CONTEXT_WARN_ZONE_START_DEG = CONTEXT_WARN_LEFT_PERCENT * 3.6;
 
 /**
  * 圆环双色（起点 → 终点）的 CSS 变量引用：颜色即状态。
@@ -82,18 +104,12 @@ export function contextRingColorVars(level: ContextRingLevel): { a: string; b: s
 }
 
 /**
- * 圆环分档 → 文字色（与环身同色系，但不含渐变：数字是纯色）。
- * normal 档沿用主文字色（常态不喧宾夺主），预警/危险档用对应状态色。
+ * 分档 → 容器 `data-level` 值（驱动边框与数字色的 CSS 选择器）。
+ *
+ * 为什么保留这个恒等映射：分档公式在 TS，而边框/数字色的具体样式在
+ * `foundation.css`（明暗两套 + color-mix），两边靠 `data-level` 这个契约对齐。
+ * 收成一个导出值是让「哪几档存在」只有一处定义，新增档位不会漏改 CSS。
  */
-export function contextRingTextColor(level: ContextRingLevel): string {
-	switch (level) {
-		case "notice":
-		case "warn":
-			return "var(--ctx-warn)";
-		case "danger":
-		case "critical":
-			return "var(--ctx-danger)";
-		default:
-			return "var(--color-text-primary)";
-	}
+export function contextLevelAttribute(level: ContextRingLevel): string {
+	return level;
 }

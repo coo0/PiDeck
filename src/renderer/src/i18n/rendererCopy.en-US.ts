@@ -3556,6 +3556,9 @@ export const enUS: Record<TranslationKey, string> = {
 	"settings.sectionEditors": "External Editors",
 	"settings.contentWidthPct": "Chat Content Width",
 	"settings.contentWidthPctDesc": "Messages, composer and queued prompts share the same width. 100% is nearly full pane (12px minimum inset).",
+	// Context spend pop animation switch (-N tok flying left from the ring)
+	"settings.contextSpendAnimation": "Show context spend animation",
+	"settings.contextSpendAnimationDesc": "When the context grows, a “-N tok” label flies out to the left of the bottom-bar ring. Turning this off keeps usage tracking and the ring number updated — only the animation is skipped.",
 	"settings.theme": "Theme",
 	"settings.themeSystem": "System",
 	"settings.themeSchedule": "Follow time",

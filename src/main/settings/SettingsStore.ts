@@ -185,6 +185,8 @@ Gitmoji 对应关系：
 	chatContentWidthPct: 80,
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
+	// 上下文消耗扣血动画默认开启（外观设置可关；关后只是不播动画，消耗照常）
+	contextSpendAnimation: true,
 	maxEditorFileSizeMB: 5,
 	externalEditors: createDefaultExternalEditorSettings(),
 
@@ -367,6 +369,10 @@ export class SettingsStore {
 			if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
 				this.settings.announcementNotificationEnabled = defaultSettings.announcementNotificationEnabled;
 			}
+			// 消耗动画开关：旧 settings.json 无此字段（新增项）时回落默认开启。
+			if (typeof this.settings.contextSpendAnimation !== "boolean") {
+				this.settings.contextSpendAnimation = defaultSettings.contextSpendAnimation;
+			}
 			// 兼容迁移：内置 CommitMono 字体已移除（打包瘦身），旧设置里的 "commit-mono"
 			// 不再存在于 AppFontMonoMode 枚举，统一回退到系统等宽字体，避免类型漂移。
 			// 注意：磁盘 JSON 是无类型的，旧值可能是已删除的枚举项，先拓宽为 string 再比较。
@@ -535,6 +541,10 @@ export class SettingsStore {
 			} else {
 				delete safePatch.sessionTabMaxWidth;
 			}
+		}
+		// 消耗动画开关：非布尔值丢弃（旧 settings.json 脏数据不让开关变成「永远开」）
+		if ("contextSpendAnimation" in safePatch && typeof safePatch.contextSpendAnimation !== "boolean") {
+			delete safePatch.contextSpendAnimation;
 		}
 		// 全局快捷键覆盖来自渲染层，入参不可信：只保留已知 id + 合法 accelerator 的条目。
 		if ("shortcuts" in safePatch) {

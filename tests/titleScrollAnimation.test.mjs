@@ -35,5 +35,5 @@ test("reduced-motion reset keeps title hover-scroll alive", () => {
 	const foundation = readFileSync("src/renderer/src/styles/foundation.css", "utf8");
 	const reset = foundation.match(/@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]*?\n\}/)?.[0];
 	assert.ok(reset, "global reduced-motion reset must exist");
-	assert.match(reset, /\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)\s*,\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::before\s*,\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::after/, "title scroll must be excluded from the single-frame animation reset");
+	assert.match(reset, /\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\):not\(\.animate-context-hit\)[\s\S]{0,200}?animation-duration:\s*0\.01ms/, "title scroll must be excluded from the single-frame animation reset");
 });

@@ -9,8 +9,10 @@ import { t } from "../i18n";
  * 1. **串行**：同时只飞一条，前一条结束后才播下一条（并行叠加会糊成一片）；
  * 2. **去重**：由 `consumeTokenDelta` 决定是否入队——重复读数、压缩回落、
  *    会话切换、首次读数都不触发（基线更新照旧，否则下一次差值会算错）；
- * 3. **尊重减少动效**：`prefers-reduced-motion: reduce` 时**跳过入队**（不飞），
- *    数字本身仍在圆环旁更新。刻意不做「静态显示再消失」——那是残留噪声而非信息。
+ * 3. **纯数据层**：本 hook 不做任何「要不要显示」的判断——外观开关由组件层
+ *    用 `hidden` 隐藏元素（display:none），与入队逻辑无关。
+ *    早期版本在这里读 `prefers-reduced-motion` 提前 return，导致「开关打开也
+ *    看不到动画」且用户无法自查；现已移除，改由 CSS 豁免（见 foundation.css）。
  *
  * 播放推进有 animationend 与 setTimeout 两条路径（双保险）：动画被中断/丢帧时
  * animationend 可能永远不来，超时兜底保证队列不会卡死。
@@ -26,6 +28,11 @@ const SPEND_FALLBACK_EXTRA_MS = 400;
 function prefersReducedMotion(): boolean {
 	if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
 	return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** 当前是否处于「减少动效」偏好下（仅作调试/取证用，不参与入队判定）。 */
+export function isReducedMotionPreferred(): boolean {
+	return prefersReducedMotion();
 }
 
 export type ContextSpendEffects = {
@@ -110,7 +117,6 @@ export function useContextSpendEffects(input: { sessionId: string; tokens?: numb
 			sessionId: input.sessionId,
 		});
 		if (delta === null) return;
-		if (prefersReducedMotion()) return;
 		// 文案走 i18n（中英同 commit）：纯函数只格式化数字。
 		queueRef.current.push(t("composerEffort.spendTokens", { tokens: formatSpendCount(delta) }));
 		playNext();

@@ -142,3 +142,14 @@ export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	expandInterimDuringStream: true,
 	collapsePrevRunsOnNewTurn: true,
 });
+
+/**
+ * 上下文消耗扣血动画开关（设置项 contextSpendAnimation 的渲染层快照）。
+ *
+ * 为什么放 atom 而不是 props 透传：动画在 `useContextSpendEffects` 里触发，
+ * 而该 hook 挂在底栏圆环（App → Pane → ComposerArea → ComposerBottomBar → Meter）
+ * 的深层；为它加一条 5 层 props 链会把「外观偏好」混进 composer 的业务契约。
+ * 与 turnFlowSettingsAtom 同一模式：App 在 settings 变化时写入，消费方直接订阅。
+ * 默认 true（与 main SettingsStore.defaultSettings 保持一致）。
+ */
+export const contextSpendAnimationAtom = atom(true);

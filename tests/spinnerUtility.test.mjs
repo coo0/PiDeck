@@ -28,8 +28,8 @@ test("spinner utility centralizes an explicit loading-state animation", () => {
 	const foundationStyles = readFileSync(`${rendererRoot}/styles/foundation.css`, "utf8");
 	assert.match(
 		foundationStyles,
-		/\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\),\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::before,\s*\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\)::after\s*\{[\s\S]*?animation-duration:\s*0\.01ms\s*!important;[\s\S]*?animation-iteration-count:\s*1\s*!important;/,
-		"the global reduced-motion reset must exclude loading spinners and title hover-scroll",
+		/\*:not\(\.animate-pideck-spin\):not\(\.animate-title-scroll\):not\(\.animate-context-hit\),[\s\S]*?animation-duration:\s*0\.01ms\s*!important;[\s\S]*?animation-iteration-count:\s*1\s*!important;/,
+		"the global reduced-motion reset must exclude loading spinners, title hover-scroll and the context spend pop",
 	);
 });
 

@@ -401,6 +401,43 @@ fallback 取值优先级：模型默认档位 > levels 的中间档 > levels[0]
 > 状态色仍由 `contextRingLevel(ringPercent)` 分档并写入 `data-level`，只改变圆环双色和数字色；
 > 容器保持无边框，hover 只保留轻微圆环光晕。扣血动画仍按原规则保留。
 
+### 2.0 动画开关（外观设置 `contextSpendAnimation`）
+
+**只做渲染层隐藏**，不参与 hook 入队、不改 CSS：
+
+```tsx
+// SessionContextMeter：关闭时元素根本不进 DOM（不是靠 CSS 隐藏）
+{spendAnimationEnabled && spend.spendLabel !== null && <span data-testid="session-context-spend" … />}
+```
+
+数据流：`settings.json` → `AppSettings.contextSpendAnimation`（默认 `true`）
+→ App 的 effect 写入 `contextSpendAnimationAtom` → 组件订阅。
+走 atom 而非 props 是因为动画在 `useContextSpendEffects`（底栏第 5 层），
+为一条外观偏好加 5 层 props 链会污染 composer 的业务契约。
+
+**为什么不在 hook 里门控（曾经踩过的坑）**：
+
+早期版本在 `useContextSpendEffects` 里 `if (!animationEnabled) return`，
+并把它排在 `prefersReducedMotion()` **前面**。后果：
+
+1. 一个「显示」开关去拦数据流，职责错位；
+2. 系统关闭「显示动画」时（`prefers-reduced-motion: reduce`）开关被静默架空——
+   用户实测「菜单上是开启的，但看不到动画」，且界面上完全看不出原因；
+3. 关掉开关会连后面的基线更新一起跳过。
+
+**另一个必需的配套修改**：`foundation.css` 的全局 reduced-motion 重置把
+`animation-duration` 压成 `0.01ms`，消耗动画原本不在豁免名单里，
+所以即使开关开着也看不见（实测 computed `1e-05s`）。现与 spinner / 标题滚动
+同策略加入豁免——它同样是**信息反馈**（告知本次消耗多少 token），
+且已有用户显式开关控制，不再叠加系统偏好二次拦截。
+
+验证（CDP，系统 `prefers-reduced-motion: true` 环境下）：
+
+| 动画 | computed 时长 | 说明 |
+|---|---|---|
+| `.animate-context-hit` | `3s` | 已豁免 ✓ |
+| `.animate-thinking-sweep`（对照） | `1e-05s` | 仍按系统偏好压缩 ✓ |
+
 ### 2.1 圆环配色
 
 ```css

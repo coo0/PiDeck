@@ -229,6 +229,12 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 	},
 	{
 		tab: "appearance",
+		slug: "appearance-context-spend-animation",
+		labelKey: "settings.contextSpendAnimation",
+		keywords: ["消耗动画", "token 动画", "扣血动画", "上下文动画", "spend animation", "token animation"],
+	},
+	{
+		tab: "appearance",
 		slug: "appearance-native-title-bar",
 		labelKey: "settings.nativeTitleBar",
 		keywords: ["原生标题栏", "标题栏", "title bar", "窗口标题"],

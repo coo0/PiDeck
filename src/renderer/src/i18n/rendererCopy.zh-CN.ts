@@ -3550,6 +3550,9 @@ export const zhCN = {
 	"settings.sectionEditors": "外部编辑器",
 	"settings.contentWidthPct": "聊天内容宽度",
 	"settings.contentWidthPctDesc": "消息、输入框与待发送共用同一宽度。100% 接近全宽（仍留 12px 边距）。",
+	// 上下文消耗扣血动画开关（底栏圆环向左飞出 -N tok）
+	"settings.contextSpendAnimation": "显示上下文消耗动画",
+	"settings.contextSpendAnimationDesc": "上下文有新消耗时，从底栏圆环向左飞出一条「-N tok」提示。关闭后消耗照常计入、圆环数字照常更新，只是不播动画。",
 	"settings.theme": "主题",
 	"settings.themeSystem": "跟随系统",
 	"settings.themeSchedule": "跟随时间",

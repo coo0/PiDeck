@@ -869,11 +869,14 @@ select:focus-visible {
 }
 @media (prefers-reduced-motion: reduce) {
   /* Spinner 是进行中操作的功能反馈，不是装饰性动效；标题滚动是用户主动
-     hover 触发的「查看完整标题」功能行为（压成单帧会直接跳尾，无法阅读）。
-     两者保留其线性运动，其余动画仍按系统偏好压缩为单帧。 */
-  *:not(.animate-pideck-spin):not(.animate-title-scroll),
-  *:not(.animate-pideck-spin):not(.animate-title-scroll)::before,
-  *:not(.animate-pideck-spin):not(.animate-title-scroll)::after {
+     hover 触发的「查看完整标题」功能行为（压成单帧会直接跳尾，无法阅读）；
+     消耗动画是信息反馈（告知本次消耗多少 token），且已有独立的外观开关
+     由用户显式控制——若这里再压成单帧，会出现「开关开着但看不到动画」且
+     用户无法自查的情形（实测：系统关闭「显示动画」时 animation-duration
+     被压成 0.01ms，肉眼不可见）。三者保留其运动，其余动画仍按系统偏好压缩为单帧。 */
+  *:not(.animate-pideck-spin):not(.animate-title-scroll):not(.animate-context-hit),
+  *:not(.animate-pideck-spin):not(.animate-title-scroll):not(.animate-context-hit)::before,
+  *:not(.animate-pideck-spin):not(.animate-title-scroll):not(.animate-context-hit)::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;

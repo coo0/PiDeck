@@ -398,6 +398,15 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 						<span className="min-w-8 shrink-0 text-right font-brand text-sm text-muted-foreground tabular-nums">{draft.chatContentWidthPct}%</span>
 					</div>
 				</SettingRow>
+				{/* 消耗动画：与聊天区观感相关，归在「聊天排版」；关闭后只是不播动画，消耗照常 */}
+				<SettingSwitchRow
+					anchor="appearance-context-spend-animation"
+					title={t("settings.contextSpendAnimation")}
+					description={t("settings.contextSpendAnimationDesc")}
+					checked={draft.contextSpendAnimation ?? true}
+					dirty={isDirty("contextSpendAnimation")}
+					onChange={(checked) => updateDraft({ contextSpendAnimation: checked })}
+				/>
 			</SettingsSection>
 
 			{/* 窗口样式 */}

@@ -29,7 +29,7 @@ import { buildSettingsCommands, type PaletteCommand } from "./utils/commandPalet
 import { CommandPalette } from "./components/overlays/CommandPalette";
 import { CommandPaletteOnboarding, markCommandPaletteOnboardingSeen } from "./components/overlays/CommandPaletteOnboarding";
 import { desktopApi as api, isLanWeb, missingElectronPreload } from "./desktopApi";
-import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, openAutomationModalAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
+import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, contextSpendAnimationAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, openAutomationModalAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
 import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
 import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
@@ -691,6 +691,8 @@ export function App() {
 		contentMaxWidth: 1800,
 		chatContentWidthPct: 80,
 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
+		// 消耗动画默认开启（与主进程 SettingsStore 默认一致）
+		contextSpendAnimation: true,
 		maxEditorFileSizeMB: 5,
 		externalEditors: createDefaultExternalEditorSettings(),
 
@@ -769,6 +771,13 @@ export function App() {
 	useEffect(() => {
 		setBusySendDelivery(settings.busySendDelivery);
 	}, [settings.busySendDelivery, setBusySendDelivery]);
+
+	// 消耗动画开关 → 渲染层镜像 atom：底栏圆环的 hook 直接订阅，
+	// 避免为一条外观偏好加 5 层 props 链（与 turnFlowSettingsAtom 同模式）。
+	const setContextSpendAnimation = useSetAtom(contextSpendAnimationAtom);
+	useEffect(() => {
+		setContextSpendAnimation(settings.contextSpendAnimation ?? true);
+	}, [settings.contextSpendAnimation, setContextSpendAnimation]);
 
 	// 启动预热：应用起来后把「已开启用量查询」的供应商各查一次（串行错峰），
 	// 打开模型/认证页即可直接看到徽章数值，不必先手动刷新。

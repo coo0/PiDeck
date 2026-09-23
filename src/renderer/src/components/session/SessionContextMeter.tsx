@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
-import { useSetAtom } from "jotai";
+import { useAtomValue, useSetAtom } from "jotai";
 import { t } from "../../i18n";
 import type { AgentRuntimeState } from "../../../../shared/types";
 import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
 import { compactUiState, resolveCompactUsagePercent } from "../../../../shared/compactFeedback";
-import { openSettingsAtom } from "../../atoms/app-ui-atoms";
+import { openSettingsAtom, contextSpendAnimationAtom } from "../../atoms/app-ui-atoms";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
@@ -40,6 +40,7 @@ import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
  * tooltip 的已用百分比 `context.percent`；不再换算剩余量。容器不显示状态边框。
  * 新消耗时从圆环向左飞出 `-N tok`（队列串行，见 useContextSpendEffects）：
  * 同一读数重复上报、压缩后回落、会话切换均不触发。
+ * 外观设置 `contextSpendAnimation`（默认开）关闭时该元素不渲染。
  */
 
 /** 圆环几何（14px 外径 / 2px 环宽 / 原先的紧凑尺寸）定义在 tailwind.css 的
@@ -288,6 +289,9 @@ export function SessionContextMeter(props: {
 	const ringAngle = contextRingAngleDeg(ringPercent);
 	// 扣血动画：相邻两帧的正向增量才触发（重复读数/压缩回落/会话切换都不触发）。
 	const spend = useContextSpendEffects({ sessionId: props.sessionId, tokens: props.state?.contextTokens });
+	// 外观设置开关（默认开）：**只做渲染层隐藏**，不入队逻辑与 CSS 均不受影响。
+	// 关掉时元素根本不进 DOM，动画自然不显示；消耗统计与圆环数字照常更新。
+	const spendAnimationEnabled = useAtomValue(contextSpendAnimationAtom);
 	const showCompact = props.onCompact !== undefined;
 	// 压缩按钮态走共享策略：无占用数据（percent 未上报）禁用；压缩中禁用。
 	// 传 context?.percent 而非 ?? 0 后的 percent：占位环需要 0，但未就绪判定
@@ -304,8 +308,10 @@ export function SessionContextMeter(props: {
 			    标签越长飞得越远；四层发光 + 1px 描边光晕保证发光里仍有实心感。
 			    定位与上游一致：相对 meter 左缘、垂直居中（left-0 top-1/2），
 			    key=pulseKey 重挂元素以重启动画（同一标签连续两次也要重播）；
-			    animationend 推进队列，hook 内另有超时兜底（动画被中断时不卡死）。 */}
-			{spend.spendLabel !== null && (
+			    animationend 推进队列，hook 内另有超时兜底（动画被中断时不卡死）。
+			    外观开关关闭时整块不渲染（不靠 CSS 隐藏）：这是「页面上不显示」的
+			    最直接实现，也不会影响 hook 的队列推进与基线计算。 */}
+			{spendAnimationEnabled && spend.spendLabel !== null && (
 				<span
 					key={spend.pulseKey}
 					data-testid="session-context-spend"

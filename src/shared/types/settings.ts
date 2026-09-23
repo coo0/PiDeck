@@ -274,6 +274,12 @@ export type AppSettings = {
 	 * SESSION_TAB_BADGE_EXTRA_WIDTH（28px，旧 132px 差值）。外观设置滑杆可调。
 	 */
 	sessionTabMaxWidth: number;
+	/**
+	 * 上下文消耗扣血动画（新 token 消耗时从圆环向左飞出 `-N tok`）。
+	 * 默认开启；关闭后消耗照常发生，只是不播动画（`prefers-reduced-motion` 也会跳过）。
+	 * 外观设置「聊天排版」区可关。
+	 */
+	contextSpendAnimation: boolean;
 	/** 编辑器最大文件大小（MB），超过此大小的文件不加载编辑器。默认 5MB。 */
 	maxEditorFileSizeMB: number;
 	/** 外部编辑器配置：首次异步检测后保存，用户可在设置中手动覆盖路径。 */

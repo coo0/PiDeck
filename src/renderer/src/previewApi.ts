@@ -156,6 +156,8 @@ let previewSettings: AppSettings = {
 	contentMaxWidth: 1800,
 	chatContentWidthPct: 80,
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
+	// 与主进程 SettingsStore 默认一致：消耗动画默认开启
+	contextSpendAnimation: true,
 	maxEditorFileSizeMB: 5,
 	externalEditors: createDefaultExternalEditorSettings(),
 

@@ -23,9 +23,12 @@ test("classifyConflict: fork 身份与自有能力取 ours", () => {
 	assert.equal(classifyConflict("src/renderer/src/components/session/SessionContextMeter.tsx"), "ours");
 });
 
-test("classifyConflict: 上游所有取 theirs", () => {
-	assert.equal(classifyConflict("src/main/pi/AgentManager.ts"), "theirs");
-	assert.equal(classifyConflict("src/renderer/src/components/sidebar/Sidebar.tsx"), "theirs");
+test("classifyConflict: 默认取 custom（ours），因为冲突必然含 custom 改动", () => {
+	// git 只在双方改同一处时冲突，所以冲突文件一定含 custom 改动 → 默认保留 custom。
+	assert.equal(classifyConflict("src/main/pi/AgentManager.ts"), "ours");
+	assert.equal(classifyConflict("src/renderer/src/components/sidebar/Sidebar.tsx"), "ours");
+	assert.equal(classifyConflict("src/main/index.ts"), "ours");
+	assert.equal(classifyConflict("src/shared/ipc.ts"), "ours");
 });
 
 test("classifyConflict: 生成物走 regenerate，package.json 走字段级合并", () => {
@@ -35,10 +38,10 @@ test("classifyConflict: 生成物走 regenerate，package.json 走字段级合�
 	assert.equal(classifyConflict("package.json"), "package-json");
 });
 
-test("classifyConflict: package-lock.json 取上游（fork 不新增依赖）", () => {
-	// fork 没有额外依赖：lock 由上游拥有，冲突时取上游而不是重新生成
-	// （重新生成会保留 fork 的旧 lock 状态，与上游 deps 不一致）。
-	assert.equal(classifyConflict("package-lock.json"), "theirs");
+test("classifyConflict: package-lock.json 走默认 ours（custom 优先）", () => {
+	// 按「custom 为先」原则：若 lock 真冲突（双方都改），保留 custom 侧；
+	// 生成物/依赖一致性由合并后的 npm ci 与门禁把关。
+	assert.equal(classifyConflict("package-lock.json"), "ours");
 });
 
 test("classifyConflict: 上游组装层带 fork 改动的文件走 patch（不得静默取上游）", () => {
@@ -99,6 +102,14 @@ test("parseSyncUpstreamArgs: 默认推送并跑门禁，可用开关关闭", () 
 	assert.deepEqual(parseSyncUpstreamArgs([]), { dryRun: false, push: true, skipTests: false });
 	assert.deepEqual(parseSyncUpstreamArgs(["--dry-run"]), { dryRun: true, push: true, skipTests: false });
 	assert.deepEqual(parseSyncUpstreamArgs(["--no-push", "--skip-tests"]), { dryRun: false, push: false, skipTests: true });
+});
+
+test("classifyConflict: 未知文件也默认 ours，绝不默认丢 custom 改动", () => {
+	// 回归守卫：默认值一旦改回 theirs，冲突时会静默删除 custom 功能。
+	const unknown = ["src/some/new/file.ts", "src/main/pi/AgentManager.ts", "package-lock.json"];
+	for (const file of unknown) {
+		assert.equal(classifyConflict(file), "ours", `${file} 必须默认取 custom`);
+	}
 });
 
 test("策略表与 docs/fork-conflict-policy.md 不矛盾：A/C 区文件都在文档里出现", () => {

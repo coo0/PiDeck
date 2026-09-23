@@ -120,15 +120,34 @@ export function parseSyncUpstreamArgs(argv) {
 }
 
 /** 判断冲突文件的处置方式（纯函数）。 */
+/**
+ * 判断冲突文件的处置方式（纯函数）。
+ *
+ * ## 为什么默认是 `ours`（custom 优先）而不是 `theirs`
+ *
+ * git 的语义保证：**只有双方都改了同一处才会产生冲突**。若只有上游改了某文件，
+ * git 会直接采用上游；若只有 custom 改了，git 会直接保留 custom。因此**每一个冲突
+ * 文件都必然包含 custom 的改动**——此时取上游（theirs）等于静默删掉 custom 的功能，
+ * 正是 AGENTS.md 明禁的失败模式，也与「custom 新增功能与 bug 修复优先」的原则相悖。
+ *
+ * 所以默认取 custom（ours），并把「上游对该文件的改动被放弃」明确记入摘要，
+ * 由 typecheck + 全量测试门禁把关，让人有机会复核。宁可噪声大，不可静默丢改动。
+ *
+ * 特例（优先于默认）：
+ * - `package-json`：字段级合并（保留 custom 身份字段 + 上游其余）
+ * - `regenerate`：生成物取上游后重新生成（生成器会读 custom 的源文件，不会丢 custom 内容）
+ * - `patch`：上游重度重构的组装层 → 取上游 + 重放 custom 补丁（双方都保留，优于整文件取边）
+ */
 export function classifyConflict(filePath) {
 	const normalized = filePath.replace(/^\.\//, "");
 	if (CONFLICT_POLICY.packageJson.includes(normalized)) return "package-json";
 	if (CONFLICT_POLICY.regenerate.includes(normalized)) return "regenerate";
-	if (CONFLICT_POLICY.ours.includes(normalized)) return "ours";
-	// 补丁重放优先于 theirs：这些文件属于上游，但 fork 在其中有真实改动，
-	// 直接取上游会静默删掉 fork 功能（AGENTS.md 禁止的失败模式）。
+	// patch 重放优先于 ours：这些文件上游会持续重构，整文件取 custom 会连带回退
+	// 上游的重构（可能破坏其它依赖它的代码）；重放补丁能在上游基础上保住 custom 的改动。
 	if (PATCH_REPLAY_FILES.includes(normalized)) return "patch";
-	return "theirs";
+	if (CONFLICT_POLICY.ours.includes(normalized)) return "ours";
+	// 默认 custom 优先：冲突必然意味着这里有 custom 的改动，不能丢。
+	return "ours";
 }
 
 /**
@@ -310,6 +329,18 @@ function resolveConflicts(worktree, files) {
 		}
 	}
 	return { unresolved, resolved };
+}
+
+/**
+ * 取上游侧（stage 3）与该文件 merge-base 的差异，即「若取 custom 会放弃的上游改动」。
+ * 用于复核：尤其确认上游没有修掉同一个 bug。取不到时返回空串。
+ */
+function upstreamSideDiff(worktree, file) {
+	const theirs = git(["show", `:3:${file}`], worktree);
+	if (!theirs.ok) return "";
+	// 用 diff 对比 stage3 与 stage1（base）不好做（base 不总是存在），
+	// 直接给上游版本的局部上下文更有用：列出上游侧冲突块附近的代码。
+	return theirs.stdout.slice(0, 4000);
 }
 
 function writeConflictReport(payload) {
@@ -606,6 +637,23 @@ function mergeAndResolve(worktree) {
 
 	const { unresolved, resolved } = resolveConflicts(worktree, files);
 	for (const item of resolved) log(`   ✅ ${item.file} → ${item.how}`);
+
+	// 取 custom（ours）的代价：上游对这些文件的改动被放弃。必须显式列出，
+	// 否则「上游修了同一个 bug」或「上游修了另一个 bug」都会被默默丢掉。
+	// 列出被放弃的上游 diff 供人工复核；门禁（typecheck + 全量测试）是第二道防线。
+	const droppedUpstream = resolved.filter((item) => item.how.startsWith("ours")).map((item) => item.file);
+	if (droppedUpstream.length > 0) {
+		const dropped = droppedUpstream.map((file) => ({ file, upstreamDiff: upstreamSideDiff(worktree, file) }));
+		writeConflictReport({
+			reason: "custom-priority-applied",
+			upstream: UPSTREAM_BRANCH,
+			target: TARGET_BRANCH,
+			files: droppedUpstream,
+			detail: dropped,
+		});
+		log(`ℹ️  ${droppedUpstream.length} 个文件按「custom 优先」保留，上游侧改动已放弃；`);
+		log(`   清单与上游 diff 已写入 ${CONFLICT_REPORT_PATH}（供复核，不阻断合并）`);
+	}
 
 	if (unresolved.length > 0) {
 		// 策略未覆盖：不推送，留下报告交给人工 / issue

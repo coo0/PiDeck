@@ -16,6 +16,13 @@ name: Fork Release
 # compareVersions 语义比较（预发布低于同号正式版），不会把用户拉回上游版本。
 
 on:
+  # tag push 触发（与上游 release.yml 同一约定：只认 v* 开头的 tag）。
+  # 这样「合并 → 打 tag → 自动出包」可以串成一条链路。
+  # 注意：tag push 触发时 inputs.* 均为空，resolve 步骤会回退到 package.json 版本，
+  # 因此 package.json 的 version 必须与 tag 一致（见下方 Stamp version 步骤说明）。
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       tag:
@@ -68,21 +75,45 @@ jobs:
         id: resolve
         env:
           INPUT_TAG: ${{ inputs.tag }}
+          # tag push 事件没有 inputs，用 github.ref_name 拿到实际 tag
+          PUSH_TAG: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
           set -euo pipefail
           PKG_VERSION=$(node -p "require('./package.json').version")
-          if [ -n "$INPUT_TAG" ]; then
+          if [ -n "$PUSH_TAG" ]; then
+            # tag push：直接用该 tag（它就是触发源，不能被覆盖）
+            TAG="$PUSH_TAG"
+          elif [ -n "$INPUT_TAG" ]; then
             TAG="$INPUT_TAG"
           else
-            # 留空 → 基于 package.json 版本 + 运行号，保证每次都能得到唯一 tag
+            # 手动触发且留空 → 基于 package.json 版本 + 运行号，保证每次都能得到唯一 tag
             BASE="${PKG_VERSION%%-*}"
             TAG="v${BASE}-custom.${{ github.run_number }}"
           fi
           VERSION="${TAG#v}"
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "ref=${{ inputs.ref || 'custom' }}" >> "$GITHUB_OUTPUT"
-          echo "Resolved tag=${TAG} version=${VERSION} ref=${{ inputs.ref || 'custom' }}"
+          echo "ref=${{ inputs.ref || github.ref_name || 'custom' }}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${TAG} version=${VERSION}"
+
+      # tag push 场景的硬校验：package.json 的版本必须与 tag 一致。
+      # 为什么：electron-updater 按预发布 channel 匹配 release（当前版本
+      # 0.7.7-custom.1 → channel=custom → 只认 tag 里带 -custom 的 release）。
+      # 若 tag 是 v0.7.7-custom.1 而 package.json 还是上游的 0.7.7，
+      # 打包出的 app 版本与 tag 不符，用户端永远检测不到更新。
+      - name: Verify package.json version matches tag (tag push only)
+        if: github.ref_type == 'tag'
+        env:
+          EXPECTED: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          ACTUAL=$(node -p "require('./package.json').version")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::package.json version ($ACTUAL) 与 tag ($EXPECTED) 不一致。"
+            echo "::error::请先把 package.json 的 version 改为 $EXPECTED 再打 tag（或删掉 tag 重打）。"
+            exit 1
+          fi
+          echo "✅ package.json version = $ACTUAL 与 tag 一致"
 
   build:
     name: Build ${{ matrix.name }}
@@ -179,7 +210,12 @@ jobs:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: ${{ needs.resolve.outputs.tag }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          draft: ${{ inputs.draft }}
+          # tag push 事件没有 inputs（${{ inputs.draft }} 为空串 → 会被当成 false，
+          # 导致 tag 一推就自动正式发布）。因此显式区分事件：
+          #   push（tag）→ 始终 draft，人工确认后再 Publish；
+          #   workflow_dispatch → 用 inputs.draft（默认 true）。
+          # 想改成 tag 即自动发布：把下面改成 `draft: false`。
+          draft: ${{ github.event_name == 'push' || inputs.draft }}
           prerelease: true
           fail_on_unmatched_files: false
           generate_release_notes: true

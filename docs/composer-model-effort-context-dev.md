@@ -458,15 +458,26 @@ const ringAngle = contextRingAngleDeg(ringPercent);
 > 1800ms、固定像素位移 `-10px/-52px/-72px`）已废弃——那套参数导致标签偏小、飞不远，
 > 位数多时看不出位移。现全部对齐上游 `.ccm-hit-pop` 的定稿值。
 
+> **位移已加大 3 倍**（用户反馈「移动距离有点短」）。上游的可见位移只有 0.63W：
+> 12%（opacity 刚变 1）时标签已偏左 1.14W，胉眼看到的总共才 49px，扣血感太弱。
+> 现只延长尾段、不动出现帧（保留「从圆环里冒出来」的观感）：
+> `72%` 从 `-146%` → `-232%`，`100%` 从 `-160%` → `-286%`。
+> 实测（`-1,240 tok`，宽 77px）：完全可见段 12%→72% 从 33px 增到 **99px**，
+> 全程 12%→100% 从 49px 增到 **145px**（2.96x）。
+
 ```css
-/* 关键帧：逐字节取自 codex-context-used-meter 的 @keyframes ccm-hit-pop */
+/* 关键帧：0%/12% 取自上游 ccm-hit-pop，72%/100% 为 PiDeck 加长版 */
 @keyframes context-hit {
   0%   { opacity: 0; transform: translate(-108%, -50%) scale(.72); }
   12%  { opacity: 1; transform: translate(-114%, -51%) scale(1);   }
-  72%  { opacity: 1; transform: translate(-146%, -54%) scale(1.22); }
-  100% { opacity: 0; transform: translate(-160%, -55%) scale(1.34); }
+  72%  { opacity: 1; transform: translate(-232%, -54%) scale(1.22); }
+  100% { opacity: 0; transform: translate(-286%, -55%) scale(1.34); }
 }
+```
 
+> 边界已核算：最坏情况（`-1,240,000 tok`，宽 108px）飞出 327px，落点 left=794，
+> 而最近的裁剪容器（`.composer` 的 `overflow-hidden`）左边界在 347——余量 2 倍以上，
+> 不会被裁。标签宽度用百分比自适应，长数字飞更远但仍安全。
 /* 元素（定位与上游一致：相对 meter 左缘、垂直居中） */
 position: absolute; left: 0; top: 50%; z-index: 9;
 font: 850 14px/1 var(--font-family-mono);   /* 上游固定 14px/850，不跟主题缩放 */
@@ -485,9 +496,9 @@ animation: context-hit 3000ms cubic-bezier(.16,.84,.24,1) forwards;
 will-change: opacity, transform, filter;
 ```
 
-> **位移用自身宽度百分比**（`-108%` → `-160%`）而不是固定像素：标签越长飞得越远。
-> 实测（`-1,240 tok`，自身宽 77px）：0% → -0.94W、12% → -1.14W、72% → -1.57W、100% → -1.77W，
-> 与上游四个断点逐点吻合（百分比相对未变换盒子，`scale` 收缩会让左边缘回移，故不是 1.08/1.6）。
+> **位移用自身宽度百分比**而不是固定像素：标签越长飞得越远。
+> 实测（`-1,240 tok`，自身宽 77px）：0% → -0.94W、12% → -1.14W、72% → -2.43W、100% → -3.03W
+> （百分比相对未变换盒子，`scale` 收缩会让左边缘回移，故不是 1.08/2.86）。
 
 **浅色主题**：上游的高亮暖渐变在白底上不可读，PiDeck 换深色渐变（唯一偏离上游之处，
 因为上游只跑在 Codex 的深色页上）：
@@ -665,7 +676,7 @@ export function effortColorVar(effort: string): string {
 - [x] 圆环弧长和右侧数字直接使用 tooltip 同源的 `context.percent`
 - [x] 5 档状态色映射与已用百分比阈值一致
 - [x] 所有状态不显示容器边框
-- [x] 扣血动画 `3000ms`，关键帧 4 个断点与上游 `ccm-hit-pop` 逐点吻合
+- [x] 扣血动画 `3000ms`；出现帧（0%/12%）对齐上游，尾段加长 3 倍
 - [x] 扣血标签 `14px` / `850` / 四层发光 + 1px 描边（照搬上游 `.ccm-hit-pop`）
 - [x] pulse `620ms`，峰值 `scale(1.22)` 在 `28%`
 - [x] 队列串行；`animationend` + `setTimeout` 双保险

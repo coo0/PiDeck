@@ -231,19 +231,41 @@ test("spend animation matches codex-context-used-meter .ccm-hit-pop 逐项参数
 	// 时长/缓动：上游 SPEND_EFFECT_DURATION_MS = 3000，cubic-bezier(0.16,0.84,0.24,1)
 	assert.match(css, /--animate-context-hit: context-hit 3000ms cubic-bezier\(0\.16, 0\.84, 0\.24, 1\) forwards;/);
 
-	// 关键帧 4 个断点与上游 ccm-hit-pop 一致（含 12%/72% 而非旧的 11%/70%）
+	// 关键帧：0%/12%（出现帧）与上游 ccm-hit-pop 一致；72%/100% 比上游延长 3 倍
+	// （上游可见位移只有 0.63W，扣血感太弱——用户反馈「移动距离有点短」）
 	const keyframes = css.slice(css.indexOf("@keyframes context-hit"), css.indexOf("@keyframes context-pulse"));
 	for (const [stop, transform] of [
 		["0%", "translate(-108%, -50%) scale(0.72)"],
 		["12%", "translate(-114%, -51%) scale(1)"],
-		["72%", "translate(-146%, -54%) scale(1.22)"],
-		["100%", "translate(-160%, -55%) scale(1.34)"],
+		["72%", "translate(-232%, -54%) scale(1.22)"],
+		["100%", "translate(-286%, -55%) scale(1.34)"],
 	]) {
 		assert.ok(keyframes.includes(stop), `关键帧缺少 ${stop}`);
 		assert.ok(keyframes.includes(transform), `关键帧 ${stop} 的 transform 应为 ${transform}`);
 	}
 	// 位移必须是自身宽度百分比（不是固定像素）：长标签才会飞更远
 	assert.doesNotMatch(keyframes, /translate\(-\d+px/);
+
+	// 可见位移护栏：12%（opacity 刚变 1）到 100% 的实测偏移。
+	// 实测偏移/W = translate% + (1 - scale)/2（scale 围绕中心收缩会把左边缘回移）。
+	const visibleShift = (keyframes) => {
+		const offsetOf = (stop) => {
+			const seg = keyframes.slice(keyframes.indexOf(stop));
+			const m = seg.match(/translate\((-?[\d.]+)%,[^)]*\)\s*scale\(([\d.]+)\)/);
+			return Number(m[1]) / 100 + (1 - Number(m[2])) / 2;
+		};
+		return Math.abs(offsetOf("100%") - offsetOf("12%"));
+	};
+	const visible = visibleShift(keyframes);
+	// 上游原值只有 0.63W；不得回退到那个量级，且要真的拉开距离
+	assert.ok(visible >= 1.8, `可见位移 ${visible.toFixed(2)}W 太短（上游 0.63W 已被用户否决）`);
+	// 完全可见段（12%→72%）也要明显长于上游的 0.43W
+	const offsetAt = (stop) => {
+		const seg = keyframes.slice(keyframes.indexOf(stop));
+		const m = seg.match(/translate\((-?[\d.]+)%,[^)]*\)\s*scale\(([\d.]+)\)/);
+		return Number(m[1]) / 100 + (1 - Number(m[2])) / 2;
+	};
+	assert.ok(Math.abs(offsetAt("72%") - offsetAt("12%")) >= 1.2, "完全可见段的位移不足");
 
 	// 元素尺寸：上游 font-size 14px / font-weight 850（固定值，不跟主题缩放走）
 	assert.match(source, /text-\[14px\] font-\[850\]/);

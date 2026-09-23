@@ -37,6 +37,9 @@ jobs:
   sync:
     name: Sync upstream/main into custom
     runs-on: ubuntu-latest
+    # 全量测试偶尔会挂住（AGENTS.md 记录过 Windows runner 的并发挂起）；
+    # 没有超时的话 job 会一直挂到 GitHub 的 6 小时上限，白白占住 concurrency 组。
+    timeout-minutes: 45
     steps:
       - name: Checkout custom
         uses: actions/checkout@v4
@@ -64,10 +67,15 @@ jobs:
         env:
           SKIP_TESTS: ${{ inputs.skip_tests == true && '--skip-tests' || '' }}
         run: |
-          set -o pipefail
-          # 在 CI 里推送：脚本本身不读 CI，推送权限由 checkout 的 token 提供
+          # 显式控制退出码：不同 runner/默认 shell 下 -e/-o pipefail 组合不一致，
+          # 若依赖默认行为，node 失败后最后一条 echo 可能把步骤“洗成”成功（
+          # 结果是同步失败但 CI 全绿，最危险的静默失败）。这里自己捕获再显式 exit。
+          set +e
           node scripts/sync-upstream.mjs $SKIP_TESTS 2>&1 | tee sync.log
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          echo "exit_code=${STATUS}" >> "$GITHUB_OUTPUT"
+          exit "$STATUS"
 
       - name: Upload sync log
         if: always()

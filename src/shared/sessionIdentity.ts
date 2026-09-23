@@ -143,13 +143,47 @@ function windowsPathToWslBase(path: string): string {
  * 所有会话路径在进入 catalog / Agent 状态前都应经过本函数。
  *
  * WSL 环境按 Linux 路径语义处理：相对路径解析到 /mnt/<drive>/… 基址。
+ *
+ * 输出分隔符跟随 projectPath 的风格，而不是按 environment 一刀切：native 同时覆盖
+ * Windows 与 POSIX，若一律转反斜杠，macOS/Linux 上会得到 "\Users\me\proj\…"——
+ * 既非绝对路径（path.isAbsolute 为 false）也不存在，catalog 里的 filePath 读不到历史，
+ * 该坏路径还会被当作 --session 传给 pi，在项目根目录生成幽灵会话文件。
  */
 export function toAbsoluteSessionPath(filePath: string, projectPath: string, environment: SessionEnvironment): string {
-	if (isAbsolutePath(filePath, environment)) return filePath;
+	const repaired = repairMangledNativePath(filePath, projectPath, environment);
+	if (isAbsolutePath(repaired, environment)) return repaired;
 	const base = environment === "wsl" ? windowsPathToWslBase(projectPath) : projectPath;
-	const joined = `${base.replace(/[\\/]+$/, "")}/${filePath.replace(/^[\\/]+/, "")}`;
-	// native 统一反斜杠风格，与 node:path resolve 输出一致；WSL 保持正斜杠。
-	return environment === "wsl" ? joined : joined.replace(/\//g, "\\");
+	const joined = `${base.replace(/[\\/]+$/, "")}/${repaired.replace(/^[\\/]+/, "")}`;
+	// WSL 恒为正斜杠；native 保持 base 原风格（盘符/UNC → 反斜杠，POSIX → 正斜杠）。
+	if (environment === "wsl") return joined;
+	return isWindowsStylePath(base) ? joined.replace(/\//g, "\\") : joined;
+}
+
+/** 判断 native 基址是否为 Windows 风格（盘符或 UNC/根反斜杠），用于选择分隔符。 */
+function isWindowsStylePath(base: string): boolean {
+	return /^[A-Za-z]:/.test(base) || base.startsWith("\\");
+}
+
+/**
+ * 还原旧实现在 POSIX 上产生的坏路径，让存量 catalog 条目自愈。
+ *
+ * 旧实现把 native 相对路径的分隔符一律换成反斜杠，于是 `/Users/me/proj/.pi/sessions/x.jsonl`
+ * 落盘为 `\Users\me\proj\.pi\sessions\x.jsonl`：以 `\` 开头 → isAbsolutePath 误判为已绝对而
+ * 原样放行，文件操作落到不存在的位置（会话打开空白），该坏路径还会被当作 --session 传给 pi。
+ *
+ * 只认「反斜杠开头且还原成正斜杠后确实落在项目目录内」这一种形态：
+ * - `<cwd>/\Users\…`（cwd + 字面反斜杠文件名）可能是真实存在的文件（pi 在 POSIX 上把
+ *   `\Users\…` 当相对路径解析后真的写了一个名字带反斜杠的文件），改写会指向不存在的嵌套路径；
+ * - Windows 基址下 `\Users\…` 是合法的无盘符根路径，名字里真含反斜杠的 POSIX 文件也不该被改写。
+ */
+function repairMangledNativePath(filePath: string, projectPath: string, environment: SessionEnvironment): string {
+	if (environment === "wsl") return filePath;
+	if (!filePath.startsWith("\\")) return filePath;
+	if (isWindowsStylePath(projectPath)) return filePath;
+	const base = projectPath.replace(/[\\/]+$/, "");
+	if (!base) return filePath;
+	const candidate = filePath.replace(/\\/g, "/");
+	return candidate.startsWith(`${base}/`) ? candidate : filePath;
 }
 
 /** 归档/删除子树识别用的最小会话节点（catalog 条目与渲染层 record 都满足）。 */

@@ -1,0 +1,161 @@
+diff --git a/src/renderer/src/App.tsx b/src/renderer/src/App.tsx
+index 81b670d4..0285ce9c 100644
+--- a/src/renderer/src/App.tsx
++++ b/src/renderer/src/App.tsx
+@@ -9,9 +9,9 @@ import {
+ 	Code,
+ 	Activity,
+ 	FolderOpen,
++	NotebookPen,
+ 	Globe,
+ 	History,
+-	Pencil,
+ 	Terminal,
+ 	GitBranch,
+ 	// 命令面板（Ctrl/Cmd+P）操作项图标
+@@ -29,7 +29,7 @@ import { buildSettingsCommands, type PaletteCommand } from "./utils/commandPalet
+ import { CommandPalette } from "./components/overlays/CommandPalette";
+ import { CommandPaletteOnboarding, markCommandPaletteOnboardingSeen } from "./components/overlays/CommandPaletteOnboarding";
+ import { desktopApi as api, isLanWeb, missingElectronPreload } from "./desktopApi";
+-import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, openAutomationModalAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
++import { turnFlowSettingsAtom, defaultAgentBackendAtom, effectiveAgentBackendAtom, busySendDeliveryAtom, contextSpendAnimationAtom, imageGenConfigAtom, dshRuntimeStatusAtom, openSettingsAtom, openAutomationModalAtom, sessionRecordsAtom, bumpNewTurnCollapseTickAtom } from "./atoms";
+ import { resolveBusySendDelivery } from "../../shared/busySendDelivery";
+ import { SESSION_TAB_MAX_WIDTH_DEFAULT } from "../../shared/sessionTabWidth";
+ import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../shared/fileTree";
+@@ -134,6 +134,8 @@ import { QuickTaskSurface } from "./components/app/QuickTaskSurface";
+ import { ScratchPadOverlay } from "./components/overlays/ScratchPadOverlay";
+ import { AskPanelOverlay } from "./components/overlays/AskPanelOverlay";
+ import { TerminalDockPanel } from "./components/terminal/TerminalDockPanel";
++import type { TerminalDockSettings } from "./components/terminal/TerminalDock";
++import type { TerminalThemeId } from "../../shared/types/settings";
+ import { ResizablePanel, ResizablePanelGroup } from "./components/ui-shadcn/resizable";
+ import { AppShell } from "./components/app/AppShell";
+ import { WorkspaceDrawerRail } from "./components/workspace/WorkspaceDrawerRail";
+@@ -689,6 +691,8 @@ export function App() {
+ 		contentMaxWidth: 1800,
+ 		chatContentWidthPct: 80,
+ 		sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
++		// 消耗动画默认开启（与主进程 SettingsStore 默认一致）
++		contextSpendAnimation: true,
+ 		maxEditorFileSizeMB: 5,
+ 		externalEditors: createDefaultExternalEditorSettings(),
+ 
+@@ -715,6 +719,17 @@ export function App() {
+ 		fontFamilyBaseCustom: "",
+ 		fontFamilyMono: "system-mono",
+ 		fontFamilyMonoCustom: "",
++		// 终端设置：与主进程 defaultSettings 保持一致，避免启动时闪烁
++		terminalTheme: "inherit",
++		terminalFontSize: null,
++		terminalFontFamily: "",
++		terminalScrollback: 5000,
++		terminalCursorStyle: "block",
++		terminalCursorBlink: true,
++		terminalCopyOnSelect: false,
++		terminalPaddingY: 8,
++		terminalConfirmClose: "running",
++		terminalStartupCommand: "",
+ 		removedBuiltInExtensions: [],
+ 		// 声音提醒：与主进程 defaultSettings 保持一致（完成/异常开、等待输入关）
+ 		soundAlert: createDefaultSoundAlertSettings(),
+@@ -757,6 +772,13 @@ export function App() {
+ 		setBusySendDelivery(settings.busySendDelivery);
+ 	}, [settings.busySendDelivery, setBusySendDelivery]);
+ 
++	// 消耗动画开关 → 渲染层镜像 atom：底栏圆环的 hook 直接订阅，
++	// 避免为一条外观偏好加 5 层 props 链（与 turnFlowSettingsAtom 同模式）。
++	const setContextSpendAnimation = useSetAtom(contextSpendAnimationAtom);
++	useEffect(() => {
++		setContextSpendAnimation(settings.contextSpendAnimation ?? true);
++	}, [settings.contextSpendAnimation, setContextSpendAnimation]);
++
+ 	// 启动预热：应用起来后把「已开启用量查询」的供应商各查一次（串行错峰），
+ 	// 打开模型/认证页即可直接看到徽章数值，不必先手动刷新。
+ 	useProviderUsageStartupWarmup();
+@@ -3384,6 +3406,31 @@ export function App() {
+ 		[setBranchByProject],
+ 	);
+ 
++	// 终端外观设置：App 只做字段映射（不新增业务逻辑），TerminalDock 的热更新 effect 消费。
++	// useMemo 稳定引用：每帧新对象会反复触发热更新（refit + options 重设）。
++	const terminalSettings = useMemo<TerminalDockSettings>(
++		() => ({
++			themeId: settings.terminalTheme,
++			fontSize: settings.terminalFontSize,
++			fontFamily: settings.terminalFontFamily,
++			scrollback: settings.terminalScrollback,
++			cursorStyle: settings.terminalCursorStyle,
++			cursorBlink: settings.terminalCursorBlink,
++			copyOnSelect: settings.terminalCopyOnSelect,
++			paddingY: settings.terminalPaddingY,
++			confirmClose: settings.terminalConfirmClose,
++			startupCommand: settings.terminalStartupCommand,
++		}),
++		[settings.terminalTheme, settings.terminalFontSize, settings.terminalFontFamily, settings.terminalScrollback, settings.terminalCursorStyle, settings.terminalCursorBlink, settings.terminalCopyOnSelect, settings.terminalPaddingY, settings.terminalConfirmClose, settings.terminalStartupCommand],
++	);
++	// 终端 dock 内的主题菜单写回设置（配色的单一数据源在 AppSettings）；静默保存，失败不打断终端使用
++	const setTerminalTheme = useCallback((themeId: TerminalThemeId) => {
++		void api.settings
++			.update({ terminalTheme: themeId })
++			.then(setSettings)
++			.catch(() => undefined);
++	}, []);
++
+ 	const sessionPaneServices = useMemo(
+ 		() => ({
+ 			isLanWeb,
+@@ -3422,6 +3469,8 @@ export function App() {
+ 			validCommandNames,
+ 			validFilePaths,
+ 			terminalStatesByOwner,
++			terminalSettings,
++			setTerminalTheme,
+ 			activeTerminalOwnerKey,
+ 			availableTerminalHeight: availableTerminalHeight ?? 120,
+ 			setTerminalOpenByOwnerKey,
+@@ -3475,6 +3524,8 @@ export function App() {
+ 			setTerminalOpenByOwnerKey,
+ 			showToast,
+ 			terminalStatesByOwner,
++			setTerminalTheme,
++			terminalSettings,
+ 			availableTerminalHeight,
+ 			validCommandNames,
+ 			validFilePaths,
+@@ -3522,6 +3573,8 @@ export function App() {
+ 							height={terminalRowHeight}
+ 							maxHeight={availableTerminalHeight ?? 120}
+ 							terminal={api.terminal}
++							terminalSettings={terminalSettings}
++							onThemeChange={setTerminalTheme}
+ 							ownerKey={terminalOwner ? terminalOwnerKey(terminalOwner) : undefined}
+ 							onOpenChange={setTerminalOpenForOwner}
+ 							onCollapsedChange={setTerminalCollapsedForOwner}
+@@ -3572,15 +3625,17 @@ export function App() {
+ 				: [];
+ 
+ 	// 工具开关上收会话 Tab 栏（原右侧悬浮工具条入口的唯一挂载点）：
+-	// 草稿纸 / 终端 / 外部编辑器，与抽屉开关同排。
++	// 草稿纸 / 终端 常驻在「更多操作」左侧（高频开关，一眼可见）；
++	// 「打开方式」需要鼠标坐标定位弹层，保留在「更多操作」菜单里。
+ 	// 终端按钮绑定 owner（agent 或项目），不再要求 agent 已激活；
+ 	// web 预览 / 无可用目标（纯聊天无项目）时隐藏，避免指向无处可开的终端。
+ 	const sessionToolActions: SessionToolAction[] = [
+ 		{
+ 			id: "scratch",
+ 			label: t("scratchPad.openTooltip"),
+-			icon: <Pencil size={14} />,
++			icon: <NotebookPen size={14} />,
+ 			active: scratchPad.isOpen,
++			inline: true,
+ 			onClick: () => scratchPad.toggle(),
+ 		},
+ 		...(!isLanWeb && terminalTarget
+@@ -3590,6 +3645,7 @@ export function App() {
+ 						label: t("app.terminal"),
+ 						icon: <Terminal size={14} />,
+ 						active: terminalOpen,
++						inline: true,
+ 						onClick: () => {
+ 							setTerminalOpenForOwner(!terminalOpen);
+ 						},

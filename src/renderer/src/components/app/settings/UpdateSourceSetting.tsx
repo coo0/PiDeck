@@ -16,11 +16,20 @@ const HEALTH_DOT_CLASS: Record<MirrorHealthResult["status"], string> = {
 };
 
 /**
- * 设置「版本与更新」下的更新源选择：
- * - 预设下拉：GitHub 官方（null → 原生 app-update.yml 通道）+ 内置镜像清单（域名即地址）；
- * - 选「自定义镜像…」时展开输入框，实时校验前缀（http(s)://）并预览拼接后的 feed URL；
- * - 挂载时自动体检内置镜像（latest.yml + Range 分片），下拉项前显示状态色点与实测速度，
- *   可手动「重新检测」——镜像域名可用性/速度波动大，静态维护不可靠（见 main/update/mirrorHealth.ts）。
+ * 设置「版本与更新」下的**内容更新源**选择。
+ *
+ * 本 fork 的关键语义：这个开关只影响**内容更新**（模型目录 / 内置扩展 / 技能 /
+ * 提示词 / DSH runtime / Node 侧车 / 公告 / CHANGELOG），**不影响应用自身更新**。
+ * 应用更新固定走 `github.com/coo0/PiDeck` 的 GitHub 原生通道（见 releaseRepo.ts），
+ * 因为 fork 没有 AtomGit 镜像——旧版把 atomgit 分支用在应用更新上会让 feed 指向
+ * 上游不存在的 Release。
+ *
+ * 下拉项：
+ * - AtomGit 镜像（`UPDATE_SOURCE_MIRRORS`，域名即地址）→ 内容更新走 AtomGit，国内更快；
+ * - GitHub 官方 → 内容更新走 raw.githubusercontent（源站权威）。
+ *
+ * 挂载时自动体检内置镜像（latest.yml + Range 分片），下拉项前显示状态色点与实测速度，
+ * 可手动「重新检测」——镜像域名可用性/速度波动大，静态维护不可靠（见 main/update/mirrorHealth.ts）。
  */
 export function UpdateSourceSetting(props: { draft: AppSettings; updateDraft: (patch: Partial<AppSettings>) => void }) {
 	const { draft, updateDraft } = props;
@@ -30,7 +39,7 @@ export function UpdateSourceSetting(props: { draft: AppSettings; updateDraft: (p
 	const [mirrorHealth, setMirrorHealth] = useState<Record<string, MirrorHealthResult> | null>(null);
 	const [probing, setProbing] = useState(false);
 
-	// 当前生效的更新源地址（github = null → 内置官方通道；atomgit → AtomGit generic feed 地址）。
+	// 当前生效的内容源地址（atomgit → AtomGit generic feed 地址；github → 内置官方通道）。
 	const activeFeedUrl: string | null = (() => {
 		if (source === "github") return null;
 		const mirror = UPDATE_SOURCE_MIRRORS.find((m) => m.id === source);

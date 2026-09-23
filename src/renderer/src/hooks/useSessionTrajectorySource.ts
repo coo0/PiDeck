@@ -5,6 +5,7 @@ import type { SessionProcessEvent } from "../../../shared/types/trajectory";
 import type { SessionRecord } from "../../../shared/types";
 import { prependSessionHistoryPageAtom, prependSessionMessagePageAtom, sessionMessageCacheBySessionIdAtomFamily, sessionRecordByIdAtomFamily, type SessionMessageCacheEntry } from "../atoms";
 import { sessionHistoryUnavailableState } from "../utils/sessionHistoryAvailability";
+import { t } from "../i18n";
 
 /** 与时间线 runtime 翻页对齐：一次补 3 轮，复用同一份消息缓存。 */
 const RUNTIME_HISTORY_TURN_PAGE_SIZE = 3;
@@ -27,6 +28,9 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 	const prependMessagePage = useSetAtom(prependSessionMessagePageAtom);
 	const prependHistoryPage = useSetAtom(prependSessionHistoryPageAtom);
 	const [isLoadingMore, setIsLoadingMore] = useState(false);
+	// 上翻失败必须可见（2026-09 反馈）：只挂 .finally 时 IPC reject 无人接管，
+	// 会冒成全局「未处理异常」弹窗，且抽屉里看不出是「加载失败」还是「没有更早历史」。
+	const [loadMoreError, setLoadMoreError] = useState<string | null>(null);
 	const [processEvents, setProcessEvents] = useState<SessionProcessEvent[]>([]);
 	const [systemPrompt, setSystemPrompt] = useState<string | undefined>(undefined);
 	const loadSequenceRef = useRef(0);
@@ -107,6 +111,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			const before = diskPage.nextBefore;
 			if (before === null) return;
 			setIsLoadingMore(true);
+			setLoadMoreError(null);
 			void desktopApi.sessions
 				.readRecordMessagePage(sessionId, before, 100)
 				.then((page) => {
@@ -114,8 +119,15 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 					// DSH host 被手动停止时返回「暂时读不了」的空页：不能当前缀写进缓存，
 					// 否则 total 归零、游标被清空，「加载更多」消失且无法重试。保持现状即可，
 					// 恢复路径由时间线的「启动 host」专态给出。
-					if (sessionHistoryUnavailableState(page)) return;
+					if (sessionHistoryUnavailableState(page)) {
+						setLoadMoreError(t("timeline.dshHostStopped"));
+						return;
+					}
 					prependMessagePage({ sessionId, before, expectedRevision, page });
+				})
+				.catch((error: unknown) => {
+					if (loadSequenceRef.current !== sequence) return;
+					setLoadMoreError(error instanceof Error ? error.message : String(error));
 				})
 				.finally(() => {
 					if (loadSequenceRef.current === sequence) setIsLoadingMore(false);
@@ -131,6 +143,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		if (!runtimeHistory && !anchorEntryId && anchorFilePos === undefined) return;
 
 		setIsLoadingMore(true);
+		setLoadMoreError(null);
 		void desktopApi.sessions
 			.readRecordMessagePage(sessionId, before ?? (anchorFilePos !== undefined ? anchorFilePos : undefined), RUNTIME_HISTORY_TURN_PAGE_SIZE, {
 				beforeEntryId: anchorEntryId ?? runtimeHistory?.nextBeforeEntryId ?? undefined,
@@ -138,8 +151,15 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 			.then((page) => {
 				if (loadSequenceRef.current !== sequence) return;
 				// 与 disk 翻页同源：host 被停时的空页不是新历史（否则同样的游标/total 损坏）。
-				if (sessionHistoryUnavailableState(page)) return;
+				if (sessionHistoryUnavailableState(page)) {
+					setLoadMoreError(t("timeline.dshHostStopped"));
+					return;
+				}
 				prependHistoryPage({ sessionId, expectedRevision, before, page });
+			})
+			.catch((error: unknown) => {
+				if (loadSequenceRef.current !== sequence) return;
+				setLoadMoreError(error instanceof Error ? error.message : String(error));
 			})
 			.finally(() => {
 				if (loadSequenceRef.current === sequence) setIsLoadingMore(false);
@@ -153,6 +173,7 @@ export function useSessionTrajectorySource(sessionId: string | undefined) {
 		isDshSession,
 		hasMoreMessages: hasMore,
 		isLoadingMoreMessages: hasMore ? isLoadingMore : false,
+		loadMoreError,
 		loadMore,
 	};
 }

@@ -97,6 +97,8 @@ export function SessionTrajectoryView(props: {
 	isDsh?: boolean;
 	hasMoreMessages?: boolean;
 	isLoadingMoreMessages?: boolean;
+	/** 上翻失败原因（含 DSH host 停止）；有值时在「加载更早」旁给出可辨识失败提示。 */
+	loadMoreError?: string | null;
 	onLoadMore?: () => void;
 	variant?: "page" | "drawer";
 }) {
@@ -173,6 +175,11 @@ export function SessionTrajectoryView(props: {
 					</button>
 				) : null}
 			</div>
+			{props.loadMoreError ? (
+				<p className="shrink-0 px-2 pb-1 text-caption text-destructive" title={props.loadMoreError} data-trajectory-load-error>
+					{t("timeline.loadMoreFailed")}
+				</p>
+			) : null}
 			<TrajectoryOverview records={model.records} domainStart={model.domainStart} domainEnd={model.domainEnd} range={range} selectedId={selected?.id} onSelect={setSelectedId} onRangeChange={setRange} onHoverTick={refreshNow} />
 			<div className={drawer ? "grid min-h-0 flex-1 grid-rows-[minmax(0,1fr)_minmax(140px,38%)]" : "grid min-h-0 flex-1 grid-cols-[minmax(0,1fr)_minmax(220px,32%)]"}>
 				<TrajectoryLedger records={visible} turns={model.turns} now={now} selectedId={selected?.id} onSelect={setSelectedId} borderBottom={drawer} scrollRef={ledgerScrollRef} />

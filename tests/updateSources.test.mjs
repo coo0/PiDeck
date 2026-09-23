@@ -45,8 +45,8 @@ const mainModule = loadTsModule("src/main/update/updateSources.ts", {
 	"../../shared/types/settings": { UpdateSourceId: undefined }, // 仅类型导入，运行时无碍
 });
 
-const { normalizeUpdateSource, updateSourceFeedUrl, updateSourceLatestReleaseUrl } = mainModule;
-const { gitHubLatestDownloadBase, atomGitFeedUrl, atomGitLatestReleaseApiUrl, normalizeCustomMirrorHost } = shared;
+const { normalizeUpdateSource } = mainModule;
+const { gitHubLatestDownloadBase, atomGitFeedUrl, atomGitLatestReleaseApiUrl, normalizeCustomMirrorHost, APP_UPDATE_REPO_OWNER, APP_UPDATE_REPO } = shared;
 
 test("normalizeUpdateSource: 已知 id 原样保留", () => {
 	assert.equal(normalizeUpdateSource("atomgit"), "atomgit");
@@ -63,21 +63,17 @@ test("normalizeUpdateSource: 未知/非字符串回退 atomgit（默认首选）
 	assert.equal(normalizeUpdateSource(""), "atomgit");
 });
 
-test("updateSourceFeedUrl: github 源返回 null（走内置 app-update.yml 通道）", () => {
-	assert.equal(updateSourceFeedUrl("github", null), null);
-	assert.equal(updateSourceFeedUrl("github", "https://custom.example.com"), null);
-});
-
-test("updateSourceFeedUrl: atomgit 源生成 AtomGit generic feed baseUrl", () => {
-	assert.equal(updateSourceFeedUrl("atomgit"), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+// 本 fork：应用更新与内容更新坐标分离。内容源保持上游 ayuayue（fork 不重建内容资产），
+// 应用源指向 coo0（fork 自己的 Release）。
+test("content source keeps the upstream coordinates (ayuayue)", () => {
 	assert.equal(atomGitFeedUrl(), "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
 	assert.equal(gitHubLatestDownloadBase(), "https://github.com/ayuayue/PiDeck/releases/latest/download");
+	assert.equal(atomGitLatestReleaseApiUrl(), "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
 });
 
-test("updateSourceLatestReleaseUrl: macOS manual 检查走 AtomGit OpenAPI latest", () => {
-	assert.equal(updateSourceLatestReleaseUrl("atomgit"), "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
-	assert.equal(updateSourceLatestReleaseUrl("atomgit"), atomGitLatestReleaseApiUrl());
-	assert.equal(updateSourceLatestReleaseUrl("github"), null);
+test("app update source points at the fork coordinates (coo0)", () => {
+	assert.equal(APP_UPDATE_REPO_OWNER, "coo0");
+	assert.equal(APP_UPDATE_REPO, "PiDeck");
 });
 
 test("normalizeCustomMirrorHost: trim/去尾斜杠/协议校验", () => {

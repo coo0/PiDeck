@@ -517,51 +517,53 @@ test("stop unsubscribes updater events and clears pending work", (t) => {
 
 // --- update source ------------------------------------------------------
 
-test("start applies the configured update source feed URL (default github → no feed)", async (t) => {
+// 本 fork：应用更新固定走 GitHub 原生 provider（coo0/PiDeck），不再按 settings.updateSource
+// 切镜像 feed（atomgit 分支指向上游，fork 无镜像）。updateSource 只驱动内容更新。
+
+test("app update feed stays on the native GitHub channel regardless of updateSource", async (t) => {
 	const { service, updater } = createAutomaticService({ settings: { updateSource: "github" } });
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
-	// github 官方源：不设置 feed URL（走 app-update.yml 原生通道）
+	// 原生通道：不设置 feed URL（走 app-update.yml 的 coo0 坐标）
 	assert.equal(updater.feedUrl, null);
 });
 
-test("switching update source rebuilds the generic feed URL immediately", async (t) => {
+test("switching the content update source never repoints the app update feed", async (t) => {
 	const { service, updater, settings } = createAutomaticService({ settings: { updateSource: "github" } });
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
 	assert.equal(updater.feedUrl, null);
 
-	// 设置页切换到 atomgit 更新源：保存即生效（无需重启）
+	// 内容源切到 atomgit：不应把应用 feed 改成上游 AtomGit 镜像
 	await settings.update({ updateSource: "atomgit" });
-	service.applyUpdateSource();
-	assert.equal(updater.feedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
-
-	// 回到官方源：重置 feed，恢复原生 GitHub provider
-	await settings.update({ updateSource: "github" });
 	service.applyUpdateSource();
 	assert.equal(updater.feedUrl, null);
 });
 
-test("atomgit source is applied as generic feed URL on start", async (t) => {
+test("atomgit content source on start still leaves the app feed on the native channel", async (t) => {
 	const { service, updater } = createAutomaticService({
 		settings: { updateSource: "atomgit" },
 	});
 	stopAfter(t, service);
 	service.start({ startDelayMs: 0, intervalMs: 60_000 });
-	assert.equal(updater.feedUrl, "https://atomgit.com/ayuayue/PiDeck/releases/download/latest");
+	assert.equal(updater.feedUrl, null);
 });
 
-test("manual delivery uses latestReleaseUrl from the configured atomgit source per check", async (t) => {
+test("manual delivery checks the app-coordinate latest release, not the content mirror", async (t) => {
 	let receivedUrl;
+	let calls = 0;
 	const { service, settings } = createManualService((latestReleaseUrl) => {
+		calls += 1;
 		receivedUrl = latestReleaseUrl;
 		return Promise.resolve({ hasUpdate: false, latestVersion: null });
 	});
 	stopAfter(t, service);
 	await settings.update({ updateSource: "atomgit" });
 	await service.checkNow();
-	// macOS manual 检查：AtomGit 源 URL 传进检查器（GitHub 源时为 undefined）
-	assert.equal(receivedUrl, "https://api.atomgit.com/api/v5/repos/ayuayue/PiDeck/releases/latest");
+	// 检查器确实被调用（否则 receivedUrl 恒为 undefined，断言会空过）
+	assert.equal(calls, 1);
+	// macOS manual 检查固定走应用坐标（coo0）的 /releases/latest，不受内容源影响
+	assert.equal(receivedUrl, undefined);
 });
 
 test("manual check rejection is a check error, not a download error", async (t) => {

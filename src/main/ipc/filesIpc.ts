@@ -6,6 +6,8 @@ import { ipcChannels } from "../../shared/ipc";
 import type { FileManagerInfo, ProjectFileAccessScope } from "../../shared/types/project";
 import type { FileSearchResult } from "../../shared/types";
 import { detectFileManager, openFileManagerAt } from "../files/FileManager";
+import { listConfiguredExternalEditors, openFileInExternalEditor } from "../editors/EditorDetector";
+import { openPathWithFallback } from "../files/openPath";
 import { createProjectFileReadBoundary, resolveProjectFileReadPath, type ProjectFileReadBoundary } from "../files/projectFileAccess";
 import type { FileSystemService } from "../fs/FileSystemService";
 import type { ProjectStore } from "../projects/ProjectStore";
@@ -108,9 +110,16 @@ export function registerFilesIpc({ fileSystemService, projectStore, settingsStor
 	ipcMain.handle(ipcChannels.filesOpen, async (_event, path: unknown, scope?: unknown) => {
 		const boundary = await resolveProjectReadBoundary(scope);
 		const readablePath = await resolveReadablePath(path, boundary);
-		const error = await shell.openPath(readablePath);
-		// Electron 通过返回字符串报告打开失败；显式抛出后前端才能提示路径不存在或系统无法打开。
-		if (error) throw new Error(error);
+		// 先确认文件真实存在：Electron 的 shell.openPath 对不存在路径同样只返回 "Failed to open path"，
+		// 先 stat 可以让前端提示区分「路径失效」与「系统没有可打开该类型的程序」。
+		await stat(readablePath);
+		await openPathWithFallback(readablePath, {
+			openPath: shell.openPath,
+			// 外部编辑器复用「在编辑器中打开项目」的同一份配置与启动管线：
+			// 用户在设置里启用了编辑器，就应当同样适用于会话文件。
+			listEditors: () => listConfiguredExternalEditors(settingsStore.get()),
+			openInEditor: openFileInExternalEditor,
+		});
 	});
 
 	ipcMain.handle(ipcChannels.filesShowInFolder, async (_event, path: unknown, scope?: unknown) => {

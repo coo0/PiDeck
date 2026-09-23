@@ -51,7 +51,7 @@ test("project-scoped open/show operations resolve the registered project boundar
 		assert.match(block, /resolveProjectReadBoundary\(scope\)/);
 		assert.match(block, /resolveReadablePath\(path, boundary\)/);
 	}
-	assert.match(openBlock[0], /shell\.openPath\(readablePath\)/);
+	assert.match(openBlock[0], /openPathWithFallback\(readablePath, \{/);
 	assert.match(showBlock[0], /shell\.showItemInFolder\(readablePath\)/);
 });
 

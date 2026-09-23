@@ -423,16 +423,23 @@ export function editorLaunchSpawnOptions(): {
 	};
 }
 
-export async function openProjectInEditor(editor: ExternalEditor, projectPath: string) {
+/**
+ * 外部编辑器启动管线（项目与单文件共用）。
+ *
+ * 抽出的原因：会话文件（.jsonl）在 macOS 上没有默认关联程序，需要走与「在编辑器中
+ * 打开项目」完全相同的 spawn 逻辑（含 Windows cmd shim 解析与 WSL 路径转换）；
+ * 复制一份会让两处漂移，用户只能改到其中一个入口。
+ */
+async function launchInEditor(editor: ExternalEditor, targetPath: string, launchExtras: string[] = []): Promise<void> {
 	// 防御性解析:即便 listConfiguredExternalEditors 把 stored command 修好了,
 	// 也兜底处理从历史 settings.json 直接传过来的 legacy editor 对象,避免
 	// spawn 走 ENOENT 再回退打开资源管理器。
 	const launchCommand = (await resolveLaunchableCommand(editor.command)) ?? editor.command;
 	// WSL 项目路径转换：/mnt/d/tmp → D:\tmp，/home/user/... → \\wsl$\...\home\user\...
-	const resolvedPath = toWindowsCompatiblePath(projectPath);
+	const resolvedPath = toWindowsCompatiblePath(targetPath);
 	return new Promise<void>((resolve, reject) => {
 		const needsCmd = process.platform === "win32" && /\.(cmd|bat)$/i.test(launchCommand);
-		const launchArgs = [...(editor.args ?? []), ...(editor.id === "vscode" ? ["--new-window"] : []), resolvedPath];
+		const launchArgs = [...(editor.args ?? []), ...launchExtras, resolvedPath];
 		const command = needsCmd ? process.env.ComSpec || "cmd.exe" : launchCommand;
 		const args = needsCmd
 			? // Windows 批处理启动 GUI 程序时使用 start 更可靠；第一个空字符串是窗口标题占位。
@@ -446,7 +453,7 @@ export async function openProjectInEditor(editor: ExternalEditor, projectPath: s
 			command,
 			args,
 			originalCommand: editor.command,
-			projectPath: resolvedPath,
+			targetPath: resolvedPath,
 			needsCmd,
 		});
 
@@ -459,7 +466,7 @@ export async function openProjectInEditor(editor: ExternalEditor, projectPath: s
 				error,
 			});
 			// 部分 GUI 应用不适合 spawn 时,回退到系统打开路径,避免用户点击后无反馈。
-			const fallbackError = await shell.openPath(projectPath);
+			const fallbackError = await shell.openPath(targetPath);
 			if (fallbackError) reject(error);
 			else resolve();
 		});
@@ -480,4 +487,18 @@ export async function openProjectInEditor(editor: ExternalEditor, projectPath: s
 			});
 		});
 	});
+}
+
+export async function openProjectInEditor(editor: ExternalEditor, projectPath: string): Promise<void> {
+	// 打开项目保留 --new-window：已有窗口时复用会抢占当前工作区。
+	return launchInEditor(editor, projectPath, editor.id === "vscode" ? ["--new-window"] : []);
+}
+
+/**
+ * 用外部编辑器打开单个文件（会话 JSONL 等系统无默认关联程序的文件）。
+ * 不加 --new-window：用户点「打开会话文件」时只想看到那个文件，
+ * 新开窗口会丢失当前会话上下文。
+ */
+export async function openFileInExternalEditor(editor: ExternalEditor, filePath: string): Promise<void> {
+	return launchInEditor(editor, filePath);
 }

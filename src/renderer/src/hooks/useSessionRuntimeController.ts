@@ -95,7 +95,7 @@ export function useSessionRuntimeController(options: UseSessionRuntimeController
 				? {
 						provider: currentSession.model?.provider,
 						modelId: currentSession.model?.modelId,
-						modelName: currentSession.model?.modelId,
+						modelName: currentSession.model?.modelName ?? currentSession.model?.modelId,
 						thinkingLevel: currentSession.thinkingLevel,
 					}
 				: undefined))

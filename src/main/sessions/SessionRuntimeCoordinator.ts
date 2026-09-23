@@ -20,6 +20,7 @@ import type {
 	SessionCommandErrorCode,
 	SessionCommandResult,
 	SessionRecord,
+	SessionModelPreference,
 	SessionRuntimeEvent,
 	SessionRuntimeInfo,
 	SessionRuntimeReplacement,
@@ -29,6 +30,7 @@ import type {
 	AgentUiBatchQuestion,
 } from "../../shared/types";
 import { buildSessionOriginKey } from "../../shared/sessionIdentity";
+import { createSessionModelPreference } from "../../shared/modelDisplayName";
 import { isRewindCheckpointId, isRewindRestoreScope } from "../../shared/types";
 import type { SessionCatalogEntry } from "./SessionCatalog";
 import { sessionFileSizeMb } from "./sessionFileSizeCopy";
@@ -40,7 +42,7 @@ export interface SessionCatalogGateway {
 		sessionId: string,
 		patch: {
 			title?: string;
-			model?: { provider: string; modelId: string } | null;
+			model?: SessionModelPreference | null;
 			thinkingLevel?: string | null;
 			permissionPreset?: string | null;
 			backend?: AgentBackend;
@@ -208,14 +210,14 @@ function isInteractiveUiMethod(method: unknown): boolean {
 
 /** catalog 里会在激活后被用户改写的偏好；lastApplied 用这份快照判断要不要再 setModel。 */
 type AppliedSessionPreferences = {
-	model?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
 	thinkingLevel?: string;
 	permissionPreset?: string;
 };
 
 function snapshotPreferences(entry: SessionCatalogEntry): AppliedSessionPreferences {
 	return {
-		...(entry.model ? { model: { provider: entry.model.provider, modelId: entry.model.modelId } } : {}),
+		...(entry.model ? { model: createSessionModelPreference(entry.model.provider, entry.model.modelId, entry.model.modelName) } : {}),
 		...(entry.thinkingLevel ? { thinkingLevel: entry.thinkingLevel } : {}),
 		...(entry.permissionPreset ? { permissionPreset: entry.permissionPreset } : {}),
 	};
@@ -657,58 +659,59 @@ export class SessionRuntimeCoordinator {
 		return this.runTargetCommand(target, (agentId) => this.agents.forkSession(agentId, entryId));
 	}
 
-	setRuntimeModel(target: SessionRuntimeTarget, provider: string, modelId: string): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
+	setRuntimeModel(target: SessionRuntimeTarget, provider: string, modelId: string, modelName?: string): Promise<SessionCommandResult<SessionTargetedValue<SessionModelPreference>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			// 先调运行中 Agent；成功后再写 catalog。
-			// 若先写后失败：用户点「取消重启」时 catalog 已是新模型，下次启动会误套上；
-			// 且 ConfirmDialog 点确定也会走 onCancel，回滚与确认会互相踩。
-			// needsRestart 由渲染层在用户确认后再 updateRecord + 重启。
-			await this.agents.setModel(agentId, provider, modelId);
-			const runtimeState = await this.agents.getRuntimeState(agentId);
-			const appliedModel = runtimeState.provider && runtimeState.modelId ? { provider: runtimeState.provider, modelId: runtimeState.modelId } : { provider, modelId };
-			// 模型与思考档位是两项独立的用户选择。DSH/PI 的后端可自行规范化或拒绝
-			// reasoning effort，但中间层不能因目录元数据缺失而改写已保存的思考偏好；
-			// 否则用户切回支持该档位的模型时会丢失原选择。
-			await this.catalog.update(target.sessionId, {
-				model: appliedModel,
+			const existing = this.catalog.get(target.sessionId);
+			const selectedModel = createSessionModelPreference(provider, modelId, modelName);
+			const last = this.lastAppliedBySession.get(target.sessionId);
+			const alreadyApplied = last?.agentId === agentId && last.preferences.model?.provider === provider && last.preferences.model.modelId === modelId;
+			if (alreadyApplied && existing?.model?.modelName === selectedModel.modelName) {
+				return selectedModel;
+			}
+			// 可选模型已由运行时目录校验。命令成功后保存用户点选值，选择路径不读取
+			// get_state；完整运行态仍由独立事件流在启动/流式等场景推送。
+			if (!alreadyApplied) await this.agents.setModel(agentId, provider, modelId);
+			const updated = await this.catalog.update(target.sessionId, {
+				model: selectedModel,
 				updatedAt: Date.now(),
+			});
+			this.lastAppliedBySession.set(target.sessionId, {
+				agentId,
+				preferences: snapshotPreferences(updated),
 			});
 			void this.logger?.info("session-runtime", "Runtime model changed", {
 				sessionId: target.sessionId,
 				agentId,
 				provider,
 				modelId,
-				requestedProvider: provider,
-				requestedModelId: modelId,
-				appliedProvider: appliedModel.provider,
-				appliedModelId: appliedModel.modelId,
 			});
-			return runtimeState;
+			return selectedModel;
 		});
 	}
 
-	setRuntimeThinking(target: SessionRuntimeTarget, level: string): Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>> {
+	setRuntimeThinking(target: SessionRuntimeTarget, level: string): Promise<SessionCommandResult<SessionTargetedValue<{ thinkingLevel: string }>>> {
 		return this.runTargetCommand(target, async (agentId) => {
-			// D13：与 setRuntimeModel 一致——先调运行中 Agent，成功后再写 catalog。
-			// 原先先写 catalog 再调 agent：DSH 无模型选中时 setThinking 只记内存不落 host，
-			// catalog 已更新但 host 未生效，重启/attach 后对账漂移。
+			const last = this.lastAppliedBySession.get(target.sessionId);
+			if (last?.agentId === agentId && last.preferences.thinkingLevel === level) {
+				return { thinkingLevel: level };
+			}
+			// 候选档位已按当前模型能力过滤。成功后保存用户选择，不读取 get_state
+			// 或用其回传档位覆盖选择；runtime 状态另由事件流更新。
 			await this.agents.setThinking(agentId, level);
-			// DSH 的 selectModel 可能规范化或回退 reasoningEffort；runtime state 是
-			// host 接受后的权威值。没有当前模型时 DSH 不会产生 runtime thinking，
-			// 此时保留用户请求值作为下一次启动时应用的 catalog 偏好。
-			const runtimeState = await this.agents.getRuntimeState(agentId);
-			const appliedLevel = runtimeState.thinkingLevel ?? level;
-			await this.catalog.update(target.sessionId, {
-				thinkingLevel: appliedLevel,
+			const updated = await this.catalog.update(target.sessionId, {
+				thinkingLevel: level,
 				updatedAt: Date.now(),
+			});
+			this.lastAppliedBySession.set(target.sessionId, {
+				agentId,
+				preferences: snapshotPreferences(updated),
 			});
 			void this.logger?.info("session-runtime", "Runtime thinking changed", {
 				sessionId: target.sessionId,
 				agentId,
-				requestedLevel: level,
-				appliedLevel,
+				level,
 			});
-			return runtimeState;
+			return { thinkingLevel: level };
 		});
 	}
 
@@ -1422,7 +1425,11 @@ export class SessionRuntimeCoordinator {
 					modelId: entry.model.modelId,
 					error: errorMessage(error),
 				});
-				if (modelGoneOnPi) {
+				// 降级路径两侧行为一致：保留 catalog 偏好、沿用当前模型，并**告知用户**。
+				// DSH 不提示的话，引导页点选（已作为显式 model 带入，issue #253）会在 host
+				// 拒绝时静默失效——底栏显示用户选的模型，实际跑的是部署默认。pi 侧本来就有
+				// 会话内系统消息；DSH 的 gateway 实现走 agentsNotice toast。
+				if (modelGoneOnPi || isDsh) {
 					this.agents.notifyModelPreferenceIgnored?.(agentId, entry.model.provider, entry.model.modelId);
 				}
 			}

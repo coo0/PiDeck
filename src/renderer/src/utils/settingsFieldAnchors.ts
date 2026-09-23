@@ -245,6 +245,12 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 		labelKey: "settings.nativeMenu",
 		keywords: ["原生菜单", "菜单栏", "native menu", "窗口菜单"],
 	},
+	{
+		tab: "appearance",
+		slug: "appearance-modules",
+		labelKey: "settings.modules.title",
+		keywords: ["隐藏模块", "功能模块", "隐藏", "显示模块", "hide", "modules", "收起", "dsh", "飞书", "桌宠", "生图"],
+	},
 
 	// ── 终端 ──────────────────────────────────────────────────────────
 	{

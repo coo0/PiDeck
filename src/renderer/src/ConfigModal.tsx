@@ -44,7 +44,7 @@ import { DirtyMarker } from "./components/app/settings/SettingRows";
 import { isValidProviderName } from "../../shared/providerName";
 import { mergeProviderDraft, type AddProviderDraft } from "./config/addProviderDraft";
 import { useAtomValue } from "jotai";
-import { dshRuntimeStatusAtom } from "./atoms";
+import { dshModuleHiddenAtom, dshRuntimeStatusAtom } from "./atoms";
 import { dshUiVisibilityFor } from "../../shared/types/dshRuntime";
 
 const api: PiDesktopApi = (window as unknown as { piDesktop: PiDesktopApi }).piDesktop;
@@ -405,6 +405,17 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 	 *  新建会话默认后端跟随设置项 defaultAgentBackend（默认 pi），与此处配置管理入口相互独立。
 	 *  弹窗每次打开都会重建 state，这里从 localStorage 恢复上次选定的后端分页。 */
 	const [backendPane, setBackendPane] = useState<"dsh" | "pi">(resourceOnly ? "pi" : (focusBackendPane ?? loadLastConfigBackendPane));
+	/**
+	 * 用户隐藏了 DSH 模块（设置 → 外观 → 功能模块）：不渲染 Pi/DSH 分页头，弹窗固定在 Pi 页。
+	 * 深链点名 DSH 页（runtime 提示「去安装」等）时例外：用户是主动要去，此时保留分页头供切回 Pi。
+	 */
+	const dshModuleHidden = useAtomValue(dshModuleHiddenAtom);
+	const dshPaneHidden = dshModuleHidden && focusBackendPane !== "dsh";
+	useEffect(() => {
+		// 上次停在 DSH 页、或弹窗开着时在设置里隐藏了 DSH：回到 Pi 页，避免停在一个没有入口的页面。
+		// 只改本次弹窗的 state，不覆写 localStorage 记忆——恢复显示后仍回到用户上次的选择。
+		if (dshPaneHidden) setBackendPane("pi");
+	}, [dshPaneHidden]);
 	/** 切换后端分页并持久化：退出配置管理再进入时停留在上次选定的后端。 */
 	const selectBackendPane = useCallback((value: string) => {
 		const next = value === "pi" ? "pi" : "dsh";
@@ -2406,7 +2417,7 @@ function ConfigModalContent(props: ConfigModalContentProps) {
 		<>
 			{/* 顶层后端分页：Pi 配置管理（默认，在左）/ DSH 配置管理（在右） */}
 			<Tabs value={backendPane} onValueChange={selectBackendPane} className="flex min-h-0 min-w-0 flex-1 flex-col">
-				{!resourceOnly && (
+				{!resourceOnly && !dshPaneHidden && (
 					<TabsList
 						// 嵌入设置窗口时 Pi/DSH 用 shadcn line variant（下划线式）：与顶层「系统设置/配置管理」
 						// 的分段条（default variant）区分层级——上层页面级、下层内容级，避免两条同款 tab 冲突。

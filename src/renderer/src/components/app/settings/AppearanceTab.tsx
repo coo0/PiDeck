@@ -10,6 +10,7 @@ import { Input } from "../../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
 import { SettingsSection } from "./SettingsStorageTab";
 import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
+import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { Check, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -24,13 +25,15 @@ type AppearanceTabProps = {
 	/** 是否启用了分区字号（任一区域字号非空） */
 	perAreaFontSize: boolean;
 	setPerAreaFontSize: (checked: boolean) => void;
+	/** 视觉桥是否已启用（独立配置文件，由壳层草稿提供）：功能模块开关的活动状态标注用 */
+	visionEnabled: boolean | undefined;
 };
 
 /** 下拉选项：disabled 可选（SelectItem 透传） */
 type SelectOption = { value: string; label: string; disabled?: boolean };
 
 /**
- * 设置弹框「外观设置」tab：主题/背景/字体/聊天排版/窗口样式。
+ * 设置弹框「外观设置」tab：主题/背景/字体/聊天排版/窗口样式/功能模块。
  * 独立组件 + memo：切换 tab 或壳层无关状态变化时不重渲染本 tab。
  */
 export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabProps) {
@@ -430,6 +433,9 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 				<SettingSwitchRow anchor="appearance-native-title-bar" title={t("settings.nativeTitleBar")} checked={draft.useNativeTitleBar} onChange={(checked) => updateDraft({ useNativeTitleBar: checked })} />
 				<SettingSwitchRow anchor="appearance-native-menu" title={t("settings.nativeMenu")} checked={draft.showNativeMenu} onChange={(checked) => updateDraft({ showNativeMenu: checked })} />
 			</SettingsSection>
+
+			{/* 功能模块：按需收起不用的模块 UI 入口（issue #248） */}
+			<ModuleVisibilitySection draft={draft} updateDraft={updateDraft} isDirty={isDirty} visionEnabled={props.visionEnabled} />
 		</>
 	);
 });

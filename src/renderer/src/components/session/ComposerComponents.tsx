@@ -1,5 +1,7 @@
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
-import { Brain, Check, ChevronDown, ChevronLeft, CornerDownLeft, Eye, FileText, GitBranch, ImageIcon, ListChecks, Paperclip, Plus, RefreshCw, Sparkles, Target, Wrench, X } from "lucide-react";
+import { useAtomValue } from "jotai";
+import { dshModuleHiddenAtom, imageGenModuleHiddenAtom } from "../../atoms";
+import { AlertCircle, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Sparkles, Star, Target, Wrench, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
@@ -18,7 +20,7 @@ import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
-import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
+import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
@@ -133,9 +135,15 @@ export function ExtensionWidgetCard(props: {
 	);
 }
 
-/** 输入框底栏的后端选择下拉（pi / dsh）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
- * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。 */
+/** 输入框底栏的后端选择下拉（pi / dsh / 生图）：跟随会话后端（新建会话默认 pi，由设置项 defaultAgentBackend 决定）。
+ * 触发区只显示当前后端 logo（不再带文字）；下拉选项保留文字便于选择时区分。
+ * 用户在设置里隐藏了 DSH / 生图模块时不列对应选项；但当前草稿已选中该后端时仍保留，
+ * 否则 Select 的当前值在列表里没有对应项，用户也无法看清自己选了什么。 */
 export function ComposerBackendPicker(props: { backend: AgentBackend; disabled?: boolean; onChangeBackend: (backend: AgentBackend) => void }) {
+	const dshHidden = useAtomValue(dshModuleHiddenAtom);
+	const imageGenHidden = useAtomValue(imageGenModuleHiddenAtom);
+	const showDsh = !dshHidden || props.backend === "dsh";
+	const showImageGen = !imageGenHidden || props.backend === "imagegen";
 	return (
 		<Select value={props.backend} disabled={props.disabled} onValueChange={(value) => props.onChangeBackend(value as AgentBackend)}>
 			<SelectTrigger size="sm" className="composer-bar-btn backend h-7 gap-1 rounded-md border-transparent px-1.5 text-control font-semibold text-foreground hover:bg-muted/60 [&_[data-slot='select-icon']]:hidden" title={t("session.backendPickerHint")}>
@@ -150,14 +158,18 @@ export function ComposerBackendPicker(props: { backend: AgentBackend; disabled?:
 					<PiLogo className="size-3.5 shrink-0" />
 					{t("sessionSource.pi")}
 				</SelectItem>
-				<SelectItem value="dsh">
-					<DshLogo className="size-3.5 shrink-0" />
-					{t("sessionBackend.dsh")}
-				</SelectItem>
-				<SelectItem value="imagegen">
-					<ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
-					{t("sessionBackend.imagegen")}
-				</SelectItem>
+				{showDsh ? (
+					<SelectItem value="dsh">
+						<DshLogo className="size-3.5 shrink-0" />
+						{t("sessionBackend.dsh")}
+					</SelectItem>
+				) : null}
+				{showImageGen ? (
+					<SelectItem value="imagegen">
+						<ImageIcon className="size-3.5 shrink-0 text-muted-foreground" />
+						{t("sessionBackend.imagegen")}
+					</SelectItem>
+				) : null}
 			</SelectContent>
 		</Select>
 	);
@@ -248,10 +260,11 @@ export function ComposerBottomBar(props: {
 	onSwitchBranch?: (branch: string) => void;
 	/** Draft sessions do not have a runtime yet, so retain their persisted settings in the bar. */
 	record?: Pick<SessionRecord, "model" | "thinkingLevel">;
-	/** 当前绑定 runtime 仍 live（starting/idle/running）时，底栏才优先展示 state。 */
-	runtimeLive?: boolean;
-	/** DSH 部署默认模型/思考档位（settings.yaml agent-default-model）：草稿期展示默认值用，
-	 *  不写入记录（激活后 runtime state 覆盖）。 */
+	/**
+	 * 引导页模型与思考档位默认值；会话创建前作为唯一展示偏好。
+	 * DSH 部署默认模型/思考档位（settings.yaml agent-default-model）也仅在记录缺失时
+	 * 用作草稿展示，运行态不会覆盖用户已保存的选择。
+	 */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
 	/** 当前会话后端（pi 缺省）。 */
@@ -301,18 +314,19 @@ export function ComposerBottomBar(props: {
 	// 才读取 welcome localStorage。这样用户点选模型/思考档位后能立即看到结果，
 	// 首次发送再由 App.ensureSessionForSend 把同一显式选择带入真实会话。
 	// 该偏好可能指向已删除的模型（localStorage 残留，用户删除模型后底栏仍显示旧默认）：
-	// 引导页（无 record、pi 后端）常驻加载模型目录做存在性校验（与 ComposerPickerHost
-	// 同一判定 isWelcomeModelLost），失效则忽略偏好并清理缓存，显示回落到主进程解析的
-	// 启动默认 defaultModel（launchDefaults 已校验 models.json 存在性）。
-	// 目录命中主进程全局缓存（模型选择器同源），通常不会额外 fork pi。
+	// 引导页（无 record）模型目录：后端各自的目录都要加载，才能对各自的点选做存在性
+	// 校验（pi 读 models.json 列表，DSH 读 host catalog）。目录命中主进程全局缓存
+	//（模型选择器同源），通常不会额外 fork pi。
 	const isDsh = props.backend === "dsh";
-	const needsWelcomeCatalog = !props.record && !isDsh;
+	const needsWelcomeCatalog = !props.record;
 	const { models: welcomeCatalogModels, report: welcomeCatalogReport } = useBackendModelCatalog({
 		sessionId: props.sessionId,
 		backend: isDsh ? "dsh" : "pi",
 		enabled: needsWelcomeCatalog,
 	});
-	const welcomeModel = needsWelcomeCatalog ? readWelcomeModelPreference()?.model : undefined;
+	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
+	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 model 去校验 DSH 目录（必然「失效」）。
+	const welcomeModel = needsWelcomeCatalog ? (isDsh ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model) : undefined;
 	// 思考档位不依赖模型目录；无 record 时直接读取 picker 写入的显式选择。
 	const welcomeThinking = !props.record ? readWelcomeThinkingPreference()?.thinkingLevel : undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
@@ -328,32 +342,29 @@ export function ComposerBottomBar(props: {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
 		if (clearWelcomePreference) {
 			try {
-				localStorage.removeItem(WELCOME_MODEL_KEY);
+				localStorage.removeItem(isDsh ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY);
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [clearWelcomePreference]);
+	}, [clearWelcomePreference, isDsh]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
-	// 引导页（无 record、pi）默认模型展示：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
+	// 引导页（无 record）默认模型展示：与各后端创建时的真实套用同序（点选 > 默认）。
 	// 规则收拢到 resolveGuideDisplayModel，与 ComposerPickerHost 共用一份，避免两侧各自演化。
 	const guideDefaultModel = resolveGuideDisplayModel({
 		isDsh,
 		welcomeModel: effectiveWelcomeModel,
 		defaultModel: props.defaultModel,
 	});
-	const runtimeLive = Boolean(props.runtimeLive);
 	// 用量查询链路随会话后端：DSH 会话走 dsh（$DSH_HOME 配置 + 凭据库），其余走 pi。
 	// 圆球面板必须与 DSH 卡片/选择器同一 backend，否则查的是另一条 usage-probes.json。
 	const usageBackend: UsageProbeBackend = isDsh ? "dsh" : "pi";
 	// DSH 草稿：记录未填默认时用部署默认（settings.yaml agent-default-model）兜底展示。
-	// 非 live runtime 的残留 state 不能盖住 catalog：Agent 未启动时改模型/思考档位要立刻反映在底栏。
+	// Composer 的选择文字只取记录或引导页偏好，不能由 runtime state 改写。
 	const currentThinkingLevel = resolveComposerThinkingLevel({
-		state: props.state?.thinkingLevel,
 		record: props.record?.thinkingLevel,
 		// 引导页显式点选优先；未选择时才回退主进程解析的配置默认档位。
 		fallback: welcomeThinking ?? props.defaultThinkingLevel,
-		isLive: runtimeLive,
 	});
 	const thinkingLevelLabel = (level: string) => {
 		const labelKey = THINKING_LEVELS.find((item) => item.value === level)?.labelKey;
@@ -374,10 +385,8 @@ export function ComposerBottomBar(props: {
 		onChange: props.onChangeMode,
 	});
 	const liveModel = resolveComposerLiveModel({
-		state: props.state,
 		record: props.record?.model,
 		fallback: guideDefaultModel,
-		isLive: runtimeLive,
 	});
 	const modelDisplay = computeModelDisplay(liveModel.modelId ? liveModel : undefined, props.modelPending);
 	const modelFrom = modelDisplay.from;

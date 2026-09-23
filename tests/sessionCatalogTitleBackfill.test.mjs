@@ -350,3 +350,34 @@ test("a polluted expanded-block title is treated as a placeholder and gets backf
 		await rm(dir, { recursive: true, force: true });
 	}
 });
+
+// 回归 2026-09：Codex 导入会话的历史脏标题。
+// 旧导入器拿不到 Codex 会话名（jsonl 无该字段），把源文件名当标题写进导入产物，
+// 侧栏显示成 rollout-2026-07-13T18-44-48-019f5b14-474...（截断后就是一串会话 ID）。
+// 新导入器从 Codex 状态库/首条用户消息取到真实标题后，用户重导入即可覆盖：
+// 前提是这类标题必须被当成占位名——即使旧 catalog 曾把它写成 titleLocked=true。
+test("a legacy codex rollout filename title stays replaceable after re-import", async () => {
+	const { SessionCatalog } = loadCatalog();
+	const dir = await mkdtemp(join(tmpdir(), "pideck-catalog-title-codex-"));
+	try {
+		const filePath = "C:/sessions/codex_019f5b14-4742-7ca1-8c11-784dd0faf0d4.jsonl";
+		const dirtyTitle = "rollout-2026-07-13T18-44-48-019f5b14-474...";
+		const summary = () => lightSummary({ id: filePath, filePath, source: "codex", codexSessionId: "019f5b14-4742-7ca1-8c11-784dd0faf0d4", updatedAt: 1000 });
+
+		// 第一次合并：模拟旧导入产物已落成 rollout 标题（旧扫描器从文件 session_info 读到它）。
+		const legacyFetcher = async () => ({ name: dirtyTitle, valid: true, nameFromSessionInfo: true });
+		const legacy = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, legacyFetcher);
+		await legacy.load();
+		const [old] = await legacy.mergeScanned("project-1", [summary()]);
+		assert.equal(old.title, dirtyTitle, "历史标题原样保留");
+
+		// 用户重导入后：文件的 session_info 已是真实标题，补名链路必须能覆盖占位脏标题。
+		const fetcher = async () => ({ name: "模型部署", valid: true, nameFromSessionInfo: true });
+		const repaired = new SessionCatalog(join(dir, "sessions.json"), {}, undefined, fetcher);
+		await repaired.load();
+		const [healed] = await repaired.mergeScanned("project-1", [summary()]);
+		assert.equal(healed.title, "模型部署", "rollout 文件名标题必须能被重导入后的真实标题替换");
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+});

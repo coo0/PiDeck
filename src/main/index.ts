@@ -214,6 +214,7 @@ import { resolvePiAuthHostLaunch } from "./pi/auth/piAuthHostLaunch";
 import { testPiProxy } from "./pi/PiProxyTester";
 import { SessionScanner } from "./sessions/SessionScanner";
 import { resolveLaunchDefaultOptions, isModelInModelsConfig } from "./sessions/launchDefaults";
+import { createSessionModelPreference } from "../shared/modelDisplayName";
 import { SessionCatalog, canAttachRuntimeMetadata } from "./sessions/SessionCatalog";
 import { aggregateDshProxyMode, buildHostProxyEnvPatch, resolveDshHostProxyMode, resolveEffectiveSessionProxyMode } from "./sessions/sessionProxyPolicy";
 import { SessionRuntimeCoordinator, type SessionRuntimeBinding } from "./sessions/SessionRuntimeCoordinator";
@@ -261,7 +262,7 @@ import { toWslLinuxPath, toWindowsHostPath } from "./wsl/WslPaths";
 import { registerProjectsIpc } from "./ipc/projectsIpc";
 import { registerUsageStatsIpc } from "./ipc/usageStatsIpc";
 import { UsageStatsService } from "./usageStats/UsageStatsService";
-import { constrainWindowBoundsToWorkArea, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
+import { constrainWindowBoundsToWorkArea, type LastWindowBounds, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, readLastWindowBounds, saveLastWindowBounds } from "./windowState";
 import { createRendererCrashRecoveryGuard } from "./window/rendererCrashRecovery";
 import { registerBackgroundImageProtocol, registerBackgroundsIpc } from "./ipc/backgroundsIpc";
 import { registerGitIpc } from "./ipc/gitIpc";
@@ -327,7 +328,7 @@ let mainWindow: BrowserWindow | null = null;
 // 本文件不再出现紧凑模式的激活判断、屏幕几何计算与「关闭=返回工作台」的拦截逻辑。
 const quickTaskChrome = new QuickTaskWindowChrome({
 	getWindow: () => mainWindow,
-	saveWorkbenchBounds: (size) => saveLastWindowBounds(app.getPath("userData"), size),
+	saveWorkbenchBounds: (bounds) => saveLastWindowBounds(app.getPath("userData"), bounds),
 });
 let tray: Tray | null = null;
 /** 标记是否由用户主动退出（托盘菜单「退出」），区别于窗口关闭隐藏到托盘 */
@@ -584,12 +585,13 @@ async function createAnonymousSession(input: CreateAnonymousSessionInput): Promi
 
 	// Resolve pi-configured defaults so the composer bar shows the effective
 	// model / thinking level even before the anonymous Agent is fully started.
-	let model = input.model;
+	let model: CreateAnonymousSessionInput["model"] = input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined;
 	let thinkingLevel = input.thinkingLevel;
 	try {
 		const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
 		// 渲染层/引导页显式传入的模型（欢迎页偏好等）也可能指向已删除条目：
-		// 校验仍存在于 models.json，不存在则丢弃交给解析器兜底（lastUsed → 显式默认 → 第一个可用）。
+		// 校验仍存在于 models.json，不存在则交给 launchDefaults 按配置默认 →
+		// enabledModels → lastUsed 的顺序兜底。
 		if (model && !isModelInModelsConfig(modelsResult.parsed, model)) {
 			model = undefined;
 		}
@@ -644,12 +646,12 @@ async function activateAnonymousRuntime(session: SessionRecord, project: Project
 		const runtime = sessionRuntimeCoordinator.bindAnonymousRuntime(session.id, tab.id);
 		// Anonymous Agent 使用 --no-session 创建，不会经过普通 activateRuntime 的恢复流程；
 		// 因此在绑定后显式应用引导页选择，确保 pi 不再按自身默认优先级启动。
-		if (input.model) {
-			const result = await sessionRuntimeCoordinator.setRuntimeModel(runtime, input.model.provider, input.model.modelId);
+		if (session.model) {
+			const result = await sessionRuntimeCoordinator.setRuntimeModel(runtime, session.model.provider, session.model.modelId, session.model.modelName);
 			if (!result.ok) throw new Error(result.error.code);
 		}
-		if (input.thinkingLevel) {
-			const result = await sessionRuntimeCoordinator.setRuntimeThinking(runtime, input.thinkingLevel);
+		if (session.thinkingLevel) {
+			const result = await sessionRuntimeCoordinator.setRuntimeThinking(runtime, session.thinkingLevel);
 			if (!result.ok) throw new Error(result.error.code);
 		}
 		emitReplacementState(runtime, true);
@@ -1489,14 +1491,17 @@ async function createWindow() {
 	const backgroundColor = isDark ? "#121212" : "#f8f8f5";
 
 	// 按外观设置的启动预设调整初始尺寸；隐藏态先 maximize/fullscreen，减少首帧跳动。
-	// startupWindowMode="last"：读上次关闭时的窗口大小；读不到（首次启动/记录损坏）顺延默认 maximized
+	// startupWindowMode="last"：读上次关闭时的窗口几何（位置/尺寸/是否最大化）；
+	// 读不到（首次启动/记录损坏）顺延默认 maximized。上次是最大化时先按记录的 normal 几何
+	// 建窗再 maximize，还原后回到原位置。
 	const requestedMode = settingsStore.get().startupWindowMode ?? "last";
 	let effectiveStartupMode = requestedMode;
-	let startupBounds: { width: number; height: number };
+	let startupBounds: LastWindowBounds;
 	if (requestedMode === "last") {
 		const last = readLastWindowBounds(app.getPath("userData"));
 		if (last) {
 			startupBounds = last;
+			if (last.maximized) effectiveStartupMode = "maximized";
 		} else {
 			effectiveStartupMode = "maximized";
 			startupBounds = resolveStartupWindowBounds("maximized");
@@ -1505,8 +1510,10 @@ async function createWindow() {
 		startupBounds = resolveStartupWindowBounds(requestedMode);
 	}
 
-	// x/y 未持久化时以主显示器为确定的恢复目标；纯逻辑同时收敛尺寸并在 workArea 内居中。
-	const startupWindowBounds = constrainWindowBoundsToWorkArea(startupBounds, screen.getPrimaryDisplay().workArea);
+	// 有记录位置时以该位置所在显示器为恢复目标（多屏下回到原来那块屏）；无位置（预设模式 /
+	// 旧版只存宽高的记录）以主显示器为确定目标并居中。纯逻辑负责裁尺寸、钳位置。
+	const targetDisplay = typeof startupBounds.x === "number" && typeof startupBounds.y === "number" ? screen.getDisplayMatching({ x: startupBounds.x, y: startupBounds.y, width: startupBounds.width, height: startupBounds.height }) : screen.getPrimaryDisplay();
+	const startupWindowBounds = constrainWindowBoundsToWorkArea(startupBounds, targetDisplay.workArea);
 
 	mainWindow = new BrowserWindow({
 		show: showMainWindowImmediately,
@@ -1707,6 +1714,15 @@ async function createWindow() {
 		if (isShortcutInput("cycleThinking", input)) {
 			event.preventDefault();
 			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "cycleThinking");
+			return;
+		}
+		// 快捷消息浮层：目标是「当前聚焦会话」的输入框底栏，主进程只负责转发广播，
+		// 由渲染层按聚焦栏定位会话并唤出浮层（main 不持有会话上下文，见 renderer 的
+		// useQuickMessagePopover / ownsQuickMessageShortcut）。
+		// 注意本项不受「输入框聚焦时不触发」约束：它的用途就是打字途中插口令。
+		if (isShortcutInput("openQuickMessages", input)) {
+			event.preventDefault();
+			mainWindow.webContents.send(ipcChannels.appShortcutTriggered, "openQuickMessages");
 			return;
 		}
 		if (isShortcutInput("toggleDevTools", input)) {
@@ -3682,7 +3698,7 @@ app
 					title: input.title?.trim() || mainCopy("session.newTitle"),
 					environment: settingsStore.get().wslEnabled ? "wsl" : "native",
 					titleLocked: false,
-					model: input.model,
+					model: input.model ? createSessionModelPreference(input.model.provider, input.model.modelId, input.model.modelName) : undefined,
 					thinkingLevel: input.thinkingLevel,
 				});
 			},
@@ -3704,6 +3720,7 @@ app
 				}
 				return sessionCatalog.update(sessionId, {
 					...patch,
+					...(patch.model ? { model: createSessionModelPreference(patch.model.provider, patch.model.modelId, patch.model.modelName) } : {}),
 					title: title || undefined,
 				});
 			},
@@ -3799,7 +3816,7 @@ app
 			getRewindCheckpointDiff: (target, checkpointId) => sessionRuntimeCoordinator.getRewindCheckpointDiff(target, checkpointId),
 			restoreRewindCheckpoint: (target, checkpointId, scope) => sessionRuntimeCoordinator.restoreRewindCheckpoint(target, checkpointId, scope),
 			prepareSessionRuntimeResend: (target, messageId) => sessionRuntimeCoordinator.prepareRuntimeResend(target, messageId),
-			setSessionRuntimeModel: (target, provider, modelId) => sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId),
+			setSessionRuntimeModel: (target, provider, modelId, modelName) => sessionRuntimeCoordinator.setRuntimeModel(target, provider, modelId, modelName),
 			setSessionRuntimeThinking: (target, level) => sessionRuntimeCoordinator.setRuntimeThinking(target, level),
 			setSessionRuntimePermission: (target, preset) => sessionRuntimeCoordinator.setRuntimePermission(target, preset),
 			cloneSessionRuntime: async (target) => {

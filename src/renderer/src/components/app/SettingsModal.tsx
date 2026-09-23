@@ -16,7 +16,9 @@ import { buttonVariants } from "../ui-shadcn/button";
 import { useVisionBridgeDraft } from "./settings/visionDraft.ts";
 import { dirtySettingsTabIds, type SettingsUnsavedTabId } from "./settings/unsavedChangesSummary";
 import { computeDirtyFields } from "./settings/settingsDirtyFields.ts";
-import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS, SETTINGS_TAB_LAYOUT } from "./settings/settingsTabLayout";
+import { SETTINGS_TAB_IDS, SETTINGS_TAB_LABEL_KEYS } from "./settings/settingsTabLayout";
+import { isSettingsTabHidden, resolveInitialSettingsTab, resolveVisibleSettingsTabs } from "./settings/settingsTabVisibility";
+import { showNotice } from "../../utils/notice";
 import { useGitModels } from "./settings/gitModels.ts";
 import { formatSettingsUnsavedMessage, summarizeSettingsUnsavedChanges } from "./settings/unsavedChangesSummary.ts";
 import { UpdateInstallUnsavedDialog } from "./settings/UpdateInstallUnsavedDialog.tsx";
@@ -56,6 +58,9 @@ const SETTINGS_LAST_TAB_KEY = "pideck-settings-last-tab";
 
 /** localStorage 键：设置窗口上次打开的顶层分区（系统设置/配置管理，重开时恢复位置）。 */
 const SETTINGS_LAST_PANE_KEY = "pideck-settings-last-pane";
+
+/** 旧 settings.json 缺 hiddenModules 时的稳定空值：避免每次渲染新建数组让侧栏过滤 effect 空转。 */
+const NO_HIDDEN_MODULES: readonly string[] = [];
 
 /**
  * 读取上次打开的设置 tab；localStorage 不可用、无记录或值已失效时回退默认值 "common"。
@@ -226,7 +231,13 @@ function SettingsModalContent(props: SettingsModalProps) {
 	// 弹窗每次打开都会重新挂载（Radix Dialog 关闭即卸载内容）。
 	// 深链（如 Git「去设置」）优先于上次记住的 tab，否则会停在外观/开发等其它页。
 	const hasPendingUpdate = useAtomValue(hasPendingUpdateAtom);
-	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => getDefaultStore().get(settingsFocusAtom)?.tab ?? loadLastSettingsTab());
+	// 开弹窗时的隐藏模块快照只用于算初始 tab；侧栏过滤读草稿（下方 draftSettings.hiddenModules），开关一切即预览。
+	const [activeTab, setActiveTab] = useState<SettingsTabId>(() => resolveInitialSettingsTab(getDefaultStore().get(settingsFocusAtom)?.tab, loadLastSettingsTab(), props.settings.hiddenModules ?? NO_HIDDEN_MODULES));
+	/**
+	 * 本次弹窗内临时显示的已隐藏 tab：深链（Git「去设置」、命令面板「已隐藏，点击显示」）
+	 * 指向隐藏 tab 时不阻断也不改持久化，只让它在侧栏临时出现；弹窗关闭即失效。
+	 */
+	const [revealedTabs, setRevealedTabs] = useState<ReadonlySet<SettingsTabId>>(() => new Set());
 	const persistTab = useCallback((tab: SettingsTabId) => {
 		try {
 			localStorage.setItem(SETTINGS_LAST_TAB_KEY, tab);
@@ -495,13 +506,20 @@ function SettingsModalContent(props: SettingsModalProps) {
 		[draftSettings.favoriteModels, updateDraft],
 	);
 
-	// 侧栏条目 = 布局模块定义的顺序/分组边界 + 上面的图标文案元数据
-	const tabs = SETTINGS_TAB_LAYOUT.map((entry) => ({
+	// 侧栏条目 = 布局模块定义的顺序/分组边界，经隐藏模块过滤（按草稿，开关即预览），再拼上面的图标文案元数据
+	const hiddenModules = draftSettings.hiddenModules ?? NO_HIDDEN_MODULES;
+	const tabs = resolveVisibleSettingsTabs(hiddenModules, revealedTabs).map((entry) => ({
 		id: entry.id,
 		dividerBefore: entry.dividerBefore ?? false,
 		label: t(TAB_META[entry.id].labelKey),
 		icon: TAB_META[entry.id].icon,
 	}));
+	// 当前 tab 被隐藏（深链 / 命令面板直达）时临时显示并提示一次，避免用户看到内容却在侧栏里找不到高亮项。
+	useEffect(() => {
+		if (!isSettingsTabHidden(hiddenModules, activeTab) || revealedTabs.has(activeTab)) return;
+		setRevealedTabs((prev) => new Set(prev).add(activeTab));
+		showNotice(t("settings.modules.revealedNotice", { tab: t(SETTINGS_TAB_LABEL_KEYS[activeTab]) }), undefined, "info");
+	}, [activeTab, hiddenModules, revealedTabs]);
 
 	const hasDirtyChanges = dirtyFields.size > 0;
 	// 视觉桥/生图草稿有未保存改动时，头部保存/取消按钮同样点亮（与全局设置脏标记合并判定）
@@ -673,7 +691,7 @@ function SettingsModalContent(props: SettingsModalProps) {
 							{activeTab === "appearance" && (
 								<TabsContent value="appearance" className="settings-panel min-w-0">
 									<Suspense fallback={<SettingsTabLoading />}>
-										<AppearanceTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} perAreaFontSize={perAreaFontSize} setPerAreaFontSize={setPerAreaFontSize} />
+										<AppearanceTab draft={draftSettings} updateDraft={updateDraft} isDirty={isDirty} perAreaFontSize={perAreaFontSize} setPerAreaFontSize={setPerAreaFontSize} visionEnabled={visionDraft.draft?.enabled} />
 									</Suspense>
 								</TabsContent>
 							)}

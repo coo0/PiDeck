@@ -102,7 +102,7 @@ export type AppSettings = {
 	backgroundImageOpacity: number;
 	/** 界面语言，system 跟随系统语言；pseudo 用于长文案布局压力测试 */
 	language: AppLanguageMode;
-	/** 启动时主窗口尺寸预设，默认 last（上次窗口大小，读不到时顺延 maximized） */
+	/** 启动时主窗口几何预设，默认 last（上次窗口位置和大小，读不到时顺延 maximized） */
 	startupWindowMode: StartupWindowMode;
 	piEnvironmentChecked: boolean;
 	/** 最近一次 pi 环境检测成功的结果缓存（命令路径 + 版本），打开设置直接显示，不重复检测 */
@@ -337,6 +337,15 @@ export type AppSettings = {
 	 * 配置本身不删除（仍正常保存于 auth.json 并供 pi 加载），恢复显示即可继续展开编辑。可选以兼容旧 settings.json。
 	 */
 	hiddenAuthProviders?: string[];
+
+	// ── 功能模块显示开关：外观设置里按需收起不用的模块 UI 入口 ──
+	/**
+	 * 用户主动隐藏的功能模块 id 列表（清单与语义见 shared/hiddenModules.ts）。
+	 * 隐藏后：对应设置 tab 从侧栏消失；`dsh` 还会收起配置管理的 DSH 分页与新建会话的 DSH 选项，
+	 * `imagegen` 还会收起输入框的生图入口。只隐藏入口，不清配置、不停已启用的后台功能；
+	 * 命令面板仍可搜到并一键恢复显示。默认 `[]` 全部显示；可选以兼容旧 settings.json。
+	 */
+	hiddenModules?: string[];
 
 	// ── 供应商卡片排序：用户在模型页拖拽/上移下移后写入的自定义顺序 ──
 	/**

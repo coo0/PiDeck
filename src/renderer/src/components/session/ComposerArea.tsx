@@ -20,7 +20,6 @@ import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
 import type { GitBranchInfo } from "../../../../shared/types";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
-import { isLiveRuntimeStatus } from "../../utils/sessionCommands";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
 
 export type ComposerAreaProps = {
@@ -222,7 +221,6 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									<ComposerBottomBar
 										sessionId={props.sessionId}
 										state={composer.runtime?.state}
-										runtimeLive={isLiveRuntimeStatus(composer.runtime?.status)}
 										disabled={composer.isStarting}
 										branchDisabled={composer.isBusy || composer.isStarting}
 										thinkingDisabled={composer.isStarting}
@@ -242,8 +240,9 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											<SecurityControl sessionId={props.sessionId} backend={composer.backend} disabled={composer.isStarting} />
 										}
 										quickMessagesControl={
-											/* 快捷消息：点条目插入草稿，条目右侧按钮直发（正文不进草稿，见 useSessionSend 的 overrideText 契约） */
-											<QuickMessageMenu disabled={composer.isStarting} sendDisabled={!composer.delivery.canSendQuickMessage} onInsert={composer.pickers.insertQuickMessage} onSend={composer.delivery.sendQuickMessage} />
+											/* 快捷消息：点条目插入草稿，条目右侧按钮直发（正文不进草稿，见 useSessionSend 的 overrideText 契约）；
+											   sessionId 供全局快捷键（Ctrl/Cmd+Shift+M）按聚焦栏去重时使用。 */
+											<QuickMessageMenu sessionId={props.sessionId} disabled={composer.isStarting} sendDisabled={!composer.delivery.canSendQuickMessage} onInsert={composer.pickers.insertQuickMessage} onSend={composer.delivery.sendQuickMessage} />
 										}
 										onPickThinking={(effort) => void preference.applyThinking(effort)}
 										currentEffort={preference.currentThinkingLevel}

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { copyFile, mkdir, open, readFile, unlink } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { AgentBackend, AgentTab, SessionEnvironment, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
+import type { AgentBackend, AgentTab, SessionEnvironment, SessionModelPreference, SessionRecord, SessionSource, SessionSummary } from "../../shared/types";
 import type { SessionProxyOverride } from "../../shared/types/session";
 import { getAppLogger } from "../logging/sharedLogger";
 import { renameWithRetry } from "../utils/fsRetry";
-import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
+import { buildSessionOriginKey, buildSummaryOriginKey, canonicalizeSessionPath, collectSessionSubtreeIds, getImportedSessionSourceId, getSessionEnvironment, isInSubagentArtifactsDir, looksLikeCodexSessionFileStem, looksLikePiSessionFileStem } from "../../shared/sessionIdentity";
 import { looksLikeExpandedRefBlockTitle } from "../../shared/expandedRefBlocks";
+import { createSessionModelPreference } from "../../shared/modelDisplayName";
 
 export type SessionCatalogEntry = {
 	id: string;
@@ -38,7 +39,7 @@ export type SessionCatalogEntry = {
 	 * (fork) 标题后缀由 fork 完成时物理写入会话名（sessionForkTitle.ts），不靠该标记拼装。
 	 */
 	forked?: boolean;
-	model?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
 	thinkingLevel?: string;
 	piSessionId?: string;
 	/** DSH 会话身份（DSH host 的 sessionId）；backend=dsh 时由 DshAgentManager 创建/attach 维护。 */
@@ -127,17 +128,25 @@ function isPlaceholderCatalogTitle(title: string | undefined): boolean {
 
 /** 缺省是旧 catalog：真实标题默认已由 PiDeck 确认；仅占位标题保留一次初始化机会。 */
 function isTitleLocked(entry: Pick<SessionCatalogEntry, "title" | "titleLocked">): boolean {
+	// 历史 Codex rollout 文件名标题（旧导入器拿不到会话名时的兑底产物）永远不算锁定：
+	// 即使旧 catalog 曾把它写成 locked=true，也要允许重导入后的真实标题覆盖，
+	// 否则存量脏标题（看起来就是一串会话 ID）永久无法修复。
+	if (looksLikeCodexSessionFileStem(entry.title)) return false;
 	return entry.titleLocked ?? !isPlaceholderCatalogTitle(entry.title);
+}
+
+function cloneModelPreference(model: SessionModelPreference | undefined): SessionModelPreference | undefined {
+	return model ? createSessionModelPreference(model.provider, model.modelId, model.modelName) : undefined;
 }
 
 function cloneEntry(entry: SessionCatalogEntry): SessionCatalogEntry {
 	return {
 		...entry,
-		model: entry.model ? { ...entry.model } : undefined,
+		model: cloneModelPreference(entry.model),
 	};
 }
 
-function equalModel(left?: { provider: string; modelId: string }, right?: { provider: string; modelId: string }): boolean {
+function equalModel(left?: SessionModelPreference, right?: SessionModelPreference): boolean {
 	return left?.provider === right?.provider && left?.modelId === right?.modelId;
 }
 
@@ -364,7 +373,7 @@ export class SessionCatalog {
 		});
 	}
 
-	createAnonymous(input: { projectId: string; title: string; environment: SessionEnvironment; model?: { provider: string; modelId: string }; thinkingLevel?: string }): SessionRecord {
+	createAnonymous(input: { projectId: string; title: string; environment: SessionEnvironment; model?: SessionModelPreference; thinkingLevel?: string }): SessionRecord {
 		this.assertLoaded();
 		const now = Date.now();
 		const entry: SessionCatalogEntry = {
@@ -378,7 +387,7 @@ export class SessionCatalog {
 			wslDistro: input.environment === "wsl" ? this.identityContext.wslDistro : undefined,
 			wslUser: input.environment === "wsl" ? this.identityContext.wslUser : undefined,
 			status: "active",
-			model: input.model,
+			model: cloneModelPreference(input.model),
 			thinkingLevel: input.thinkingLevel,
 			createdAt: now,
 			updatedAt: now,
@@ -489,7 +498,7 @@ export class SessionCatalog {
 		environment: SessionEnvironment;
 		source?: SessionSource;
 		backend?: AgentBackend;
-		model?: { provider: string; modelId: string };
+		model?: SessionModelPreference;
 		thinkingLevel?: string;
 		permissionPreset?: string;
 		/**
@@ -567,7 +576,7 @@ export class SessionCatalog {
 				// 带 dshSessionId = 导入已有 host 会话（数据在 $DSH_HOME），
 				// 不是「尚未发送」的草稿：置 active，重启清理/重新打开都按真实会话处理。
 				status: input.dshSessionId ? "active" : "draft",
-				model: input.model,
+				model: cloneModelPreference(input.model),
 				thinkingLevel: input.thinkingLevel,
 				permissionPreset: input.permissionPreset,
 				agentPreset: input.agentPreset,
@@ -585,7 +594,7 @@ export class SessionCatalog {
 	async update(
 		id: string,
 		patch: Partial<Pick<SessionCatalogEntry, "title" | "backend" | "updatedAt">> & {
-			model?: { provider: string; modelId: string } | null;
+			model?: SessionModelPreference | null;
 			thinkingLevel?: string | null;
 			permissionPreset?: string | null;
 			/** DSH agent 预设（会话「模式」）：草稿期预选；null = 清除预选。 */
@@ -605,7 +614,7 @@ export class SessionCatalog {
 				transient.title = patch.title;
 				transient.titleLocked = true;
 			}
-			if (patch.model !== undefined) transient.model = patch.model ?? undefined;
+			if (patch.model !== undefined) transient.model = cloneModelPreference(patch.model ?? undefined);
 			if (patch.thinkingLevel !== undefined) transient.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) transient.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.agentPreset !== undefined) transient.agentPreset = patch.agentPreset ?? undefined;
@@ -625,7 +634,7 @@ export class SessionCatalog {
 				nextEntry.title = patch.title;
 				nextEntry.titleLocked = true;
 			}
-			if (patch.model !== undefined) nextEntry.model = patch.model ?? undefined;
+			if (patch.model !== undefined) nextEntry.model = cloneModelPreference(patch.model ?? undefined);
 			if (patch.thinkingLevel !== undefined) nextEntry.thinkingLevel = patch.thinkingLevel ?? undefined;
 			if (patch.permissionPreset !== undefined) nextEntry.permissionPreset = patch.permissionPreset ?? undefined;
 			if (patch.agentPreset !== undefined) nextEntry.agentPreset = patch.agentPreset ?? undefined;
@@ -910,7 +919,7 @@ export class SessionCatalog {
 			// (Explicit user picks are already stored on the entry and are preserved.)
 			function inheritSessionMeta(entry: SessionCatalogEntry, summary: SessionSummary) {
 				if (!entry.model && summary.model) {
-					entry.model = { ...summary.model };
+					entry.model = createSessionModelPreference(summary.model.provider, summary.model.modelId, undefined);
 					changed = true;
 				}
 				if (!entry.thinkingLevel && summary.thinkingLevel) {
@@ -965,7 +974,9 @@ export class SessionCatalog {
 					const canInitializeTitle = !isTitleLocked(entry);
 					const initialTitle = catalogDisplayTitle(summary.name) || catalogDisplayTitle(fetchedTitle);
 					const nextTitle = (canInitializeTitle ? initialTitle : undefined) || catalogDisplayTitle(entry.title) || scannedFileStemTitle(summary.filePath);
-					const nextTitleLocked = canInitializeTitle && initialTitle ? true : entry.titleLocked;
+					// rollout 文件名标题（历史导入兑底）不锁定：留一次被真实标题覆盖的机会；
+					// 真实标题一旦落库即锁定，后续 pi /name 或 JSONL 变化不再反向改写。
+					const nextTitleLocked = looksLikeCodexSessionFileStem(nextTitle) ? false : canInitializeTitle && initialTitle ? true : entry.titleLocked;
 					// 父关系最终值：新探测值优先，缺失时保留旧值（轻量扫描恒缺省，不能清掉已持久化的父）。
 					const nextParent = summary.parentSessionPath ?? fetchedParent ?? entry.parentSessionPath;
 					// fork 标记同样只增补、不清空：未探测到（轻量扫描/普通会话）保留持久化值。

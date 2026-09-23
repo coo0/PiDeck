@@ -97,6 +97,8 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "sessionTabMaxWidth", tab: "appearance", itemKey: "settings.sessionTabMaxWidth" },
 	{ field: "useNativeTitleBar", tab: "appearance", itemKey: "settings.nativeTitleBar" },
 	{ field: "showNativeMenu", tab: "appearance", itemKey: "settings.nativeMenu" },
+	// 功能模块开关组共用一个数组字段，关闭确认里合成一项
+	{ field: "hiddenModules", tab: "appearance", itemKey: "settings.modules.title" },
 
 	{ field: "terminalTheme", tab: "terminal", itemKey: "settings.terminal.theme" },
 	{ field: "terminalPaddingY", tab: "terminal", itemKey: "settings.terminal.paddingY" },

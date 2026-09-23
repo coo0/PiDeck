@@ -623,8 +623,8 @@ const api = {
 					}>
 				>
 			>,
-		setRuntimeModel: (target: SessionRuntimeTarget, provider: string, modelId: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeSetModel, target, provider, modelId) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
-		setRuntimeThinking: (target: SessionRuntimeTarget, level: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeSetThinking, target, level) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
+		setRuntimeModel: (target: SessionRuntimeTarget, provider: string, modelId: string, modelName?: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeSetModel, target, provider, modelId, modelName) as Promise<SessionCommandResult<SessionTargetedValue<{ provider: string; modelId: string; modelName?: string }>>>,
+		setRuntimeThinking: (target: SessionRuntimeTarget, level: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeSetThinking, target, level) as Promise<SessionCommandResult<SessionTargetedValue<{ thinkingLevel: string }>>>,
 		setRuntimePermission: (target: SessionRuntimeTarget, preset: string) => ipcRenderer.invoke(ipcChannels.sessionsRuntimeSetPermission, target, preset) as Promise<SessionCommandResult<SessionTargetedValue<AgentRuntimeState>>>,
 		cloneRuntime: (target: SessionRuntimeTarget) =>
 			ipcRenderer.invoke(ipcChannels.sessionsRuntimeClone, target) as Promise<

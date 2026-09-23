@@ -22,7 +22,7 @@ export function usePendingModelApply(input: {
 	sessionId: string;
 	runtime: RuntimeLike;
 	modelPending: ModelPending | undefined;
-	applyRuntimeModelState: (state: { provider?: string; modelId?: string; modelName?: string }) => void;
+	applySelectedModel: (model: { provider: string; modelId: string; modelName?: string }) => void;
 	clearPending: () => void;
 	offerRestart: (handle: SessionRuntimeTarget, model: AvailableModel) => void;
 }) {
@@ -54,9 +54,14 @@ export function usePendingModelApply(input: {
 		let cancelled = false;
 		void (async () => {
 			try {
-				const result = requireSessionCommand(await desktopApi.sessions.setRuntimeModel(handle, pending.to.provider, pending.to.modelId));
+				// 重试同样只确认命令成功，展示值由待应用选择本身提供，不读取 runtime state。
+				requireSessionCommand(await desktopApi.sessions.setRuntimeModel(handle, pending.to.provider, pending.to.modelId, pending.to.modelName));
 				if (cancelled) return;
-				current.applyRuntimeModelState(result.value);
+				current.applySelectedModel({
+					provider: pending.to.provider,
+					modelId: pending.to.modelId,
+					modelName: pending.to.modelName ?? pending.to.modelId,
+				});
 				current.clearPending();
 			} catch (error) {
 				if (cancelled) return;

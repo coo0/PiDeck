@@ -2847,8 +2847,13 @@ select:focus-visible {
    fill-mode 用 backwards 而非 both：both 会把 to{opacity:1} 永久钉在元素上，
    动画优先级高于普通声明，压掉 disabled 项的 data-[disabled]:opacity-50 置灰（
    表现为右键菜单里的禁用项不显示半透明）；backwards 结束后元素恢复正常声明，
-   由于 to 状态与元素默认值（opacity 1 / transform none）一致，视觉无差异。 */
-.dropdown-stagger > * {
+   由于 to 状态与元素默认值（opacity 1 / transform none）一致，视觉无差异。
+   必须排除 Radix popper 包裹层 [data-radix-popper-content-wrapper]：子菜单
+   （DropdownMenuSubContent 未走 Portal）就挂在菜单内容的 DOM 里，包裹层靠
+   内联 transform: translate3d(x, y, 0) 定位，而动画的 transform 优先级高于内联
+   样式，会被顶成 left:0/top:0 —— 表现为二级菜单先在父菜单左上角闪一下再瞬移
+   到位（父菜单包裹层本身带 transform，正好是它的包含块原点）。 */
+.dropdown-stagger > *:not([data-radix-popper-content-wrapper]) {
   animation: dropdown-stagger-in 180ms cubic-bezier(0.22, 1, 0.36, 1) backwards;
 }
 .dropdown-stagger > *:nth-child(1) { animation-delay: 30ms; }

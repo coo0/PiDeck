@@ -89,9 +89,9 @@ test("Batch question tabs stay on one scrolling line, and single-choice answers 
 	assert.match(overlay, /shouldAutoAdvanceBatchAnswer\(\{ type: question\.type, total \}\)/);
 	const advances = overlay.match(/(?:^|\s)answer\((?:true|false|value)/g) ?? [];
 	assert.equal(advances.length, 3, "confirm 是/否 + 批量单选 三条单值选择路径都要走 answer()");
-	// 末题必须带上刚写入的答案提交，不能读同一事件里尚未提交的 state。
+	// 末题必须带上刚写入的答案提交，不能读同一事件里尚未提交的草稿（写盘是异步应用的）。
 	assert.match(overlay, /submitAnswers\(committed\)/);
-	assert.match(overlay, /const committed = commitAnswer\(question\.id, value, label, wasCustom\)/);
+	assert.match(overlay, /const committed: AskBatchDraft = \{/);
 	// multi_select 不得自动前进（需多次勾选）：它仍然直连 props.onAnswer，不走 answer() 包装。
 	assert.match(overlay, /props\.onAnswer\(next, next\.join\("、"\)\);/);
 	assert.doesNotMatch(overlay, /answer\(next,/);

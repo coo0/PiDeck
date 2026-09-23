@@ -1,10 +1,11 @@
-import { memo } from "react";
-import { CircleCheck, CircleX, RefreshCw } from "lucide-react";
+import { memo, useState } from "react";
+import { ChevronDown, ChevronRight, CircleCheck, CircleX, RefreshCw } from "lucide-react";
 import type { RetryGroupItem } from "../timeline/types";
 import { TimelineMarker } from "../TimelineMarker";
 import { Badge } from "../../ui-shadcn/badge";
 import { t, translateI18nDescriptor } from "../../../i18n";
 import { stripAnsi } from "../TimelineFormat";
+import { resolveStepDetail, StepTraceDetails } from "./StepTraceDetails";
 
 /**
  * 自动重试过程行（run 内步骤，原位穿插）。
@@ -15,11 +16,16 @@ import { stripAnsi } from "../TimelineFormat";
  * - 最终失败：红图标 + 失败徽章（与失败工具行 danger-soft 同构），留痕可排查；
  * - 成功：中性 + 完成徽章（成功由 toast 即时报告，行保留作为周期终点痕迹）。
  * 行文案沿用主进程 i18n 描述符（正在自动重试 N，X 秒后重试 等）。
+ *
+ * 展开详情（用户反馈）：行尾 chevron 可点开查看具体错误原因
+ * （debugDetails / errorMessage，见 StepTraceDetails）。无详情时保持单行。
  */
 export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem; hidden: boolean }) {
 	const status = String(props.group.message.meta?.status ?? "");
 	const retryRunning = status === "running";
 	const retryFailed = status === "error";
+	const [expanded, setExpanded] = useState(false);
+	const hasDetail = Boolean(resolveStepDetail(props.group.message));
 	const label = stripAnsi(translateI18nDescriptor(props.group.message.meta, props.group.message.text) || props.group.message.text).trim();
 	// 状态徽章与 ToolCard 三态同构（outline 琥珀 / danger-soft 红 / secondary 完成），
 	// 扫读语言一致：一眼区分「在等重试 / 重试也救不回来 / 重试成功」。
@@ -56,8 +62,26 @@ export const RetryStep = memo(function RetryStep(props: { group: RetryGroupItem;
 							<span className={`min-w-0 flex-[1_1_auto] truncate font-mono text-caption ${retryFailed ? "text-danger" : "text-text-faint"}`} title={label}>
 								{label}
 							</span>
+							{/* 展开按钮：仅当有具体错误详情（失败原因等）可看时出现 */}
+							{hasDetail && (
+								<button
+									type="button"
+									className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-text-faint transition-colors hover:bg-bg-hover hover:text-text-secondary"
+									onClick={() => setExpanded((value) => !value)}
+									aria-expanded={expanded}
+									title={expanded ? t("common.collapse") : t("common.expand")}
+								>
+									{expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
+								</button>
+							)}
 						</div>
 					</div>
+					{/* 展开的错误详情：具体原因原文（如 "429 Too Many Requests …"） */}
+					{expanded && (
+						<div className="px-1 pb-1">
+							<StepTraceDetails message={props.group.message} />
+						</div>
+					)}
 				</section>
 			</TimelineMarker>
 		</div>

@@ -1188,7 +1188,7 @@ test("runtime model preference is not persisted when AgentManager fails", async 
 	assert.equal(harness.calls.setModel, 1);
 });
 
-test("runtime thinking persists the backend-confirmed level in the session catalog", async () => {
+test("runtime thinking persists the user-selected level without reading runtime state", async () => {
 	const { SessionRuntimeCoordinator } = loadCoordinator();
 	const harness = createHarness({
 		entry: { thinkingLevel: "off" },
@@ -1201,9 +1201,66 @@ test("runtime thinking persists the backend-confirmed level in the session catal
 	const result = await coordinator.setRuntimeThinking({ sessionId: "session-1", agentId: "agent-a", runtimeGeneration }, "high");
 
 	assert.equal(result.ok, true);
-	assert.equal(result.value.value.thinkingLevel, "max");
-	assert.equal(harness.entry.thinkingLevel, "max");
+	assert.equal(result.value.value.thinkingLevel, "high");
+	assert.equal(harness.entry.thinkingLevel, "high");
+	assert.equal(harness.calls.runtimeState, 0);
 });
+
+test("runtime model persists the user-selected model without reading runtime state", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({
+		tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+		runtimeState: { provider: "runtime", modelId: "fallback-model" },
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+
+	const result = await coordinator.setRuntimeModel({ sessionId: "session-1", agentId: "agent-a", runtimeGeneration }, "router9", "qd/qfmodel", "qwen-3.8-flash");
+
+	assert.equal(result.ok, true);
+	assert.equal(result.value.value.provider, "router9");
+	assert.equal(result.value.value.modelId, "qd/qfmodel");
+	assert.equal(result.value.value.modelName, "qwen-3.8-flash");
+	assert.equal(harness.entry.model?.provider, "router9");
+	assert.equal(harness.entry.model?.modelId, "qd/qfmodel");
+	assert.equal(harness.entry.model?.modelName, "qwen-3.8-flash");
+	assert.equal(harness.calls.runtimeState, 0);
+	assert.equal(harness.calls.setModel, 1);
+});
+test("runtime model selection normalizes a blank name to the model id", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({
+		tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+
+	const result = await coordinator.setRuntimeModel({ sessionId: "session-1", agentId: "agent-a", runtimeGeneration }, "router9", "qd/qfmodel", "   ");
+
+	assert.equal(result.ok, true);
+	assert.equal(result.value.value.modelName, "qd/qfmodel", "空白名称不是可显示值，必须回退 modelId");
+	assert.equal(harness.entry.model?.modelName, "qd/qfmodel");
+	assert.equal(harness.calls.setModel, 1);
+});
+test("reselecting an already-applied model or thinking level skips duplicate runtime commands", async () => {
+	const { SessionRuntimeCoordinator } = loadCoordinator();
+	const harness = createHarness({
+		tabs: [{ id: "agent-a", status: "idle", createdAt: 1 }],
+	});
+	const coordinator = new SessionRuntimeCoordinator(harness.catalog, harness.agents, harness.sender);
+	const runtimeGeneration = coordinator.bindExistingAgent("session-1", "agent-a");
+	const target = { sessionId: "session-1", agentId: "agent-a", runtimeGeneration };
+
+	await coordinator.setRuntimeModel(target, "router9", "qd/qfmodel");
+	await coordinator.setRuntimeModel(target, "router9", "qd/qfmodel");
+	await coordinator.setRuntimeThinking(target, "max");
+	await coordinator.setRuntimeThinking(target, "max");
+
+	assert.equal(harness.calls.setModel, 1);
+	assert.equal(harness.calls.setThinking, 1);
+	assert.equal(harness.calls.runtimeState, 0);
+});
+
 test("DSH model change preserves the recorded thinking preference", async () => {
 	// 模型和思考档位是独立选择。即使 host 此次返回了规范化后的 high，PiDeck 也不能
 	// 擅自把用户保存的 max 改掉；用户切回别的模型时仍应保留原选择。

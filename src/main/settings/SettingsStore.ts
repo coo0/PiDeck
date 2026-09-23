@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
 import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, normalizeSoundAlertSettings, type AppSettings, type TerminalConfirmCloseMode, type TerminalCursorStyle, type TerminalThemeId } from "../../shared/types";
 import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
+import { normalizeHiddenModules } from "../../shared/hiddenModules";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
 import { sanitizeShortcutOverrides } from "../../shared/shortcuts";
 import { normalizeThemeSchedule } from "../../shared/themeSchedule";
@@ -211,6 +212,8 @@ Gitmoji 对应关系：
 	hiddenProviders: [],
 	hiddenModels: [],
 	hiddenAuthProviders: [],
+	// 功能模块默认全显示：隐藏列表为空 = 不隐藏任何模块（对现有用户零行为变化）
+	hiddenModules: [],
 	// 供应商卡片自定义顺序：空数组 = 未自定义，按配置原序展示
 	providerOrder: [],
 	dshProviderOrder: [],
@@ -446,6 +449,8 @@ export class SettingsStore {
 			// 避免把脏值当成迁移种子写进配置文件；缺字段回落空数组（“没有旧数据”），
 			// 不要在这里注入出厂清单——出厂清单改由随包资源文件提供。
 			this.settings.quickMessages = normalizeQuickMessages(parsed.quickMessages);
+			// 隐藏模块来自旧 JSON 时可能是脏值（非数组/含空串与重复项）；统一清洗，缺字段回落空数组（全显示）。
+			this.settings.hiddenModules = normalizeHiddenModules(parsed.hiddenModules);
 		}
 		// showThinking 不再作为可持久化的独立配置项，完全跟随 pi agent 的 hideThinkingBlock。
 		// 启动时重新读取以确保每次启动都使用最新值，而非缓存的 defaultSettings。
@@ -635,6 +640,10 @@ export class SettingsStore {
 		}
 		if ("pinnedSessionIds" in safePatch) {
 			safePatch.pinnedSessionIds = normalizePinnedSessionIds(safePatch.pinnedSessionIds);
+		}
+		// 隐藏模块清单来自渲染层开关，入参不可信：只收字符串、去重去空。
+		if ("hiddenModules" in safePatch) {
+			safePatch.hiddenModules = normalizeHiddenModules(safePatch.hiddenModules);
 		}
 		// 声音提醒来自渲染层，入参不可信：缺字段/非法引用/越界音量一律回落默认。
 		if ("soundAlert" in safePatch) {

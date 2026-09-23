@@ -62,7 +62,7 @@ import { t } from "../i18n";
 import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
 import { PASTE_TO_FILE_MIN_CHARS } from "../rendererUtils";
 import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
-import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
@@ -347,14 +347,20 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	// 同一解析器 launchDefaults），让底栏/选择器在用户从未设置欢迎页偏好时也能
 	// 显示当前默认模型/思考档位。真实会话的默认值写在 record 里走原链路，
 	// 不需要这里重复解析。
-	// 读「有效」后端（经 DSH runtime 安装态钳制）：引导页预取的启动默认不会指向不可用后端。
+	// 后端必须取「引导页实际展示的后端」（用户显式切换优先），不能只看设置项
+	// （issue #253）：引导页切到 DSH 后若仍按 pi 解析，launchDefaults 会返回 pi 的
+	// 默认模型，底栏就显示一个 DSH 下永远不会用的模型（用户报告的
+	// 「切到 dsh 后底栏显示 pi 模型」）。按 dsh 解析时该 IPC 不返回模型（模型归属
+	// host settings），底栏自然回落到 dshDefaultModel。
+	// 仍然经 effectiveAgentBackendAtom 取默认值（DSH runtime 安装态钳制）。
 	const defaultAgentBackend = useAtomValue(effectiveAgentBackendAtom);
+	const guidePageBackend: AgentBackend = isGuideBootstrapSession ? resolveGuidePageBackend({ override: guideBackendOverride, effectiveDefault: defaultAgentBackend }) : defaultAgentBackend;
 	const [bootstrapDefaults, setBootstrapDefaults] = useState<ResolvedLaunchDefaults | undefined>(undefined);
 	useEffect(() => {
 		if (record) return;
 		let cancelled = false;
 		void desktopApi.sessions
-			.resolveLaunchDefaults({ backend: defaultAgentBackend })
+			.resolveLaunchDefaults({ backend: guidePageBackend })
 			.then((next) => {
 				if (!cancelled) setBootstrapDefaults(next);
 			})
@@ -365,7 +371,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		return () => {
 			cancelled = true;
 		};
-	}, [defaultAgentBackend, record]);
+	}, [guidePageBackend, record]);
 	const editorRef = useRef<HTMLDivElement | null>(null);
 	// 程序化光标请求（带归属 forValue，见 composer/types.ts 的 ComposerCaretRequest）；
 	// 编辑器只在内容同步到 forValue 的同一趟 layout pass 配对消费，过期请求会被丢弃。

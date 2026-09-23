@@ -371,3 +371,59 @@ export function shouldSuppressAskClick(): boolean {
 	if (typeof window === "undefined") return false;
 	return shouldSuppressAskClickSnapshot(pressSelectionSnapshot, window.getSelection()?.toString() ?? "");
 }
+
+// ---------------------------------------------------------------------------
+// ask 交互草稿（会话级持久化）
+// ---------------------------------------------------------------------------
+// 为什么放 utils：BatchAskInlineBar 的交互态（已选答案/标签/自定义标记/输入/当前 tab/展开态）
+// 原先全部是组件内 useState，切会话 tab 卸载重建即丢（用户反馈「ask 选择中切换 tab，选择没了」）。
+// 草稿的纯数据转换（提交答案、新旧 key 判定）在这里定义，可脱离 React 单测；
+// 组件侧只负责把草稿读写到 atom family（atoms/ask-draft-atoms.ts），key 含
+// sessionId/agentId/runtimeGeneration/requestId，同一请求任意次重挂都从 atom 恢复。
+
+/** 批量问答卡的交互草稿（与 BatchAskInlineBar 的 useState 一一对应）。 */
+export type AskBatchDraft = {
+	/** 每题已选答案（value 形态） */
+	answers: Record<string, BatchAnswerValue>;
+	/** 每题已选答案的展示标签（与 value 分离：选项对象 value≠label 时提交 label） */
+	labels: Record<string, string>;
+	/** 走了「其他」自定义输入的题号集合（提交时序列化 wasCustom 标记） */
+	customAnswerIds: string[];
+	/** 各题自定义输入框 / 纯输入题的当前文本 */
+	inputValues: Record<string, string>;
+	/** 当前所在题目 tab 索引 */
+	currentTab: number;
+	/** 卡片展开/折叠态 */
+	expanded: boolean;
+};
+
+/** 空草稿：所有字段的初始值。prefill 由组件在首次挂载时注入（见 SessionRuntimeUiOverlay）。 */
+export function emptyAskBatchDraft(): AskBatchDraft {
+	return { answers: {}, labels: {}, customAnswerIds: [], inputValues: {}, currentTab: 0, expanded: true };
+}
+
+/** 单问题卡的交互草稿初始值。 */
+export function emptyAskSingleDraft() {
+	return { selectedOption: "", value: "", expanded: true };
+}
+
+/**
+ * 草稿 key 是否仍是本次请求的 key。
+ *
+ * key = `${sessionId}:${agentId}:${runtimeGeneration}:${requestId}`，理论上 family key 与内容恒等；
+ * 防御的是「同一 key 实例被复用」——例如 runtime 重启后 generation 变化、或请求 id 发生重号时，
+ * 上一请求的选择不应污染新请求（还没做整体重置的过渡帧里先拦一下）。
+ */
+export function isSameAskDraftKey(left: string | undefined, right: string): boolean {
+	return left !== undefined && left === right;
+}
+
+/**
+ * 写入一题答案并返回新的草稿（纯函数）。
+ * 调用方拿返回值直接提交/继续，不依赖 React 状态异步提交（自动前进到末题时
+ * 必须带上刚写入的答案，读 state 会漏掉本题——见 SessionRuntimeUiOverlay 的 submitAnswers）。
+ */
+export function commitBatchAnswer(draft: AskBatchDraft, questionId: string, value: BatchAnswerValue, label: string, wasCustom: boolean): AskBatchDraft {
+	const customAnswerIds = wasCustom ? (draft.customAnswerIds.includes(questionId) ? draft.customAnswerIds : [...draft.customAnswerIds, questionId]) : draft.customAnswerIds.filter((id) => id !== questionId);
+	return { ...draft, answers: { ...draft.answers, [questionId]: value }, labels: { ...draft.labels, [questionId]: label }, customAnswerIds };
+}

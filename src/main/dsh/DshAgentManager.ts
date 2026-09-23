@@ -1337,14 +1337,14 @@ export class DshAgentManager implements SessionAgentGateway {
 		});
 	}
 
-	async setThinking(agentId: string, level: string): Promise<unknown> {
+	async setThinking(agentId: string, level: string): Promise<void> {
 		// DSH 的思考档走 selectModel.reasoningEffort，没有独立 RPC。
 		const runtime = this.runtime(agentId);
 		const selected = runtime.model;
 		if (!selected) {
 			// 没有当前模型时 DSH 无法把档位落到 host；只作为草稿偏好由 catalog 保存，
 			// 不写入 runtime.thinkingLevel，否则后续换模型会误把它带过去。
-			return { accepted: true, thinkingLevel: level };
+			return;
 		}
 		// 不在 PiDeck 侧预先拒绝运行中的回合：如果 host 支持动态切换，
 		// 当前回合可以直接使用；如果 host 不支持，由 selectModel 返回 busy/error。
@@ -1369,11 +1369,36 @@ export class DshAgentManager implements SessionAgentGateway {
 				runtime.thinkingLevel = previous;
 				throw this.selectModelError(updated.result.error, selected.provider, selected.model);
 			}
-			return this.getRuntimeState(agentId);
 		} catch (error) {
 			runtime.thinkingLevel = previous;
 			throw error;
 		}
+	}
+
+	/**
+	 * 会话保存的模型偏好被 host 拒绝时的用户提示（issue #253 的「选了但没生效」）。
+	 *
+	 * 引导页/草稿期的 DSH 点选已作为显式 model 传给 host（sessions.selectModel）；
+	 * host 是模型与档位能力的最终裁决者，拒绝时 applyPreferences 会降级到部署默认并
+	 * 保留 catalog 偏好——但不告知的话，用户会看到底栏显示自己选的模型，实际跑的却是
+	 * 另一个模型（比修复前的「选不动」更难排查）。
+	 *
+	 * 为什么用 toast（agentsNotice）而不是像 pi 那样插会话内系统消息：DSH 的
+	 * runtime.messages 是 host projection 的整段替换（history/回填等多处
+	 * `runtime.messages = projection.messages`），本地插入的消息在下一次投影时会被冲掉；
+	 * toast 通道（useSessionRuntimeBridge → showNotice）不依赖消息列表，可靠可见。
+	 */
+	notifyModelPreferenceIgnored(agentId: string, provider: string, modelId: string): void {
+		if (!this.runtimes.has(agentId)) return;
+		this.emit(ipcChannels.agentsNotice, {
+			agentId,
+			i18nKey: "notice.modelPreferenceIgnored",
+			kind: "warning",
+			duration: 8000,
+			// 渲染层 t() 支持 i18nParams？——不支持（bridge 只传 key），所以主文案里不放占位符，
+			// 模型身份放进 message 供 i18n 未命中时的兜底显示。
+			message: `模型偏好 ${provider}/${modelId} 未能应用（DSH host 未接受），已沿用当前模型。请重新选择。`,
+		});
 	}
 
 	async setPermission(agentId: string, preset: string): Promise<unknown> {

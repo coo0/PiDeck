@@ -176,6 +176,7 @@ let previewSettings: AppSettings = {
 	// 提供商与模型显示开关：与 SettingsStore 默认一致，预览壳默认全显示
 	hiddenProviders: [],
 	hiddenModels: [],
+	hiddenModules: [],
 
 	fontSize: "default",
 	uiFontSize: null,
@@ -760,13 +761,13 @@ export function createPreviewApi(): PiDesktopApi {
 				ok: true,
 				value: { target, value: { text: "" } },
 			}),
-			setRuntimeModel: async (target) => ({
+			setRuntimeModel: async (target, provider, modelId, modelName) => ({
 				ok: true,
-				value: { target, value: {} },
+				value: { target, value: { provider, modelId, modelName: modelName?.trim() || modelId } },
 			}),
-			setRuntimeThinking: async (target) => ({
+			setRuntimeThinking: async (target, thinkingLevel) => ({
 				ok: true,
-				value: { target, value: {} },
+				value: { target, value: { thinkingLevel } },
 			}),
 			setRuntimePermission: async (target) => ({
 				ok: true,

@@ -110,6 +110,16 @@ export type SessionProxyOverride = {
 	mode: SessionProxyMode;
 };
 
+/**
+ * PiDeck-owned selected model preference. `modelName` is the display label selected from
+ * the local model catalog; old records may omit it and render with `modelId` instead.
+ */
+export type SessionModelPreference = {
+	provider: string;
+	modelId: string;
+	modelName?: string;
+};
+
 export type SessionSummary = {
 	id: string;
 	filePath: string;
@@ -200,9 +210,9 @@ export type SessionRecord = {
 	preview: string;
 	messageCount: number;
 	status: "draft" | "active";
-	model?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
 	thinkingLevel?: string;
-	/** DSH 会话权限预设（read-only / workspace-write / danger-full-access）；
+	/** DSH 权限预设（read-only / workspace-write / danger-full-access）；
 	 *  草稿期预选，激活时经 /permission 命令应用到 host 会话。 */
 	permissionPreset?: string;
 	/**
@@ -228,10 +238,10 @@ export type SessionRecord = {
 export type CreateSessionDraftInput = {
 	projectId: string;
 	title?: string;
-	model?: { provider: string; modelId: string };
-	/** 欢迎页（引导页）偏好模型：仅作回退来源（解析器优先级：显式默认 > 欢迎偏好 > 上次使用 > 空），
-	 *  显式默认模型存在时被忽略——与 model 字段（用户主动指名）语义不同。 */
-	welcomeModel?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
+	/** 欢迎页（引导页）显式选择的模型：仅在本次创建时参与解析，优先于配置默认、
+	 * enabledModels 与 lastUsedModel；`modelName` 是点选瞬间保存的显示快照。 */
+	welcomeModel?: SessionModelPreference;
 	thinkingLevel?: string;
 	/** 运行时后端；缺省 "pi"（旧调用方无需改动）。 */
 	backend?: import("./agent").AgentBackend;
@@ -241,7 +251,7 @@ export type CreateSessionDraftInput = {
 
 /** 启动前选择的模型与思考级别；显式值优先于 pi 配置默认值。 */
 export type SessionLaunchPreferences = {
-	model?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
 	thinkingLevel?: string;
 };
 
@@ -250,7 +260,7 @@ export type SessionLaunchPreferences = {
  * 引导页（无 record 虚拟会话）用它预先高亮真正会生效的模型/思考档位。
  */
 export type ResolvedLaunchDefaults = {
-	model?: { provider: string; modelId: string };
+	model?: SessionModelPreference;
 	thinkingLevel?: string;
 	/** 解析结果是否来自用户显式配置的默认模型（settings.defaultProvider+defaultModel 且有效）。
 	 *  渲染层据此决定欢迎页偏好是否参与展示回退：显式默认存在时偏好被覆盖
@@ -280,7 +290,7 @@ export type CreateAnonymousSessionResult = {
 export type UpdateSessionRecordInput = {
 	title?: string;
 	/** null = 清空（切后端时丢掉另一套目录里的模型）。 */
-	model?: { provider: string; modelId: string } | null;
+	model?: SessionModelPreference | null;
 	thinkingLevel?: string | null;
 	/** DSH 会话权限预设（草稿期预选；激活会话经 /permission 命令应用后回写同步）。 */
 	permissionPreset?: string | null;

@@ -642,6 +642,35 @@ export const touchSessionMessagesAtom = atom(null, (get, set, sessionId: string)
 	set(sessionMessageLruAtom, [sessionId, ...get(sessionMessageLruAtom).filter((id) => id !== sessionId)].slice(0, SESSION_MESSAGE_CACHE_LIMIT));
 });
 
+/**
+ * 引导页虚拟会话首次发送：把乐观写入虚拟会话的用户气泡搬到刚创建的真实会话。
+ * 必须是「搬」而不是「拷」——虚拟会话 ID 是 renderer 常量，永不经 removeSessionStateAtom
+ * 清理，残留的缓存会在下一次引导页发送时被当作 previousMessages 追加，导致每个新会话
+ * 一开始就带着此前所有从引导页发出的消息。目标会话是刚创建的 draft，正常无既有缓存；
+ * 有则以 runtime 语义追加，不覆盖。
+ */
+export const promoteSessionMessagesCacheAtom = atom(null, (get, set, input: { fromSessionId: string; toSessionId: string }) => {
+	if (input.fromSessionId === input.toSessionId) return;
+	const source = get(sessionMessagesCacheAtom)[input.fromSessionId];
+	if (!source) return;
+	if (source.messages.length > 0) {
+		const existing = get(sessionMessagesCacheAtom)[input.toSessionId]?.messages ?? [];
+		set(cacheSessionMessagesAtom, {
+			sessionId: input.toSessionId,
+			messages: [...existing, ...source.messages],
+			source: "runtime",
+		});
+	}
+	releaseSessionOutlineProjection(input.fromSessionId);
+	const cache = { ...get(sessionMessagesCacheAtom) };
+	delete cache[input.fromSessionId];
+	set(sessionMessagesCacheAtom, cache);
+	set(
+		sessionMessageLruAtom,
+		get(sessionMessageLruAtom).filter((id) => id !== input.fromSessionId),
+	);
+});
+
 /** 历史前缀/窗口段的去重键：优先 pi entryId（跨下标空间稳定），缺省回退消息 id。 */
 function messageEntryKey(message: ChatMessage): string {
 	const entryId = message.meta?.entryId;

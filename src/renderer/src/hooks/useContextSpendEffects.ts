@@ -16,8 +16,9 @@ import { t } from "../i18n";
  * animationend 可能永远不来，超时兜底保证队列不会卡死。
  */
 
-/** 扣血动画时长（与 tailwind.css 的 --animate-context-hit 一致）。 */
-export const CONTEXT_SPEND_ANIMATION_MS = 1800;
+/** 扣血动画时长（与 tailwind.css 的 --animate-context-hit 一致；
+ *  3000ms 对齐上游 codex-context-used-meter 的 SPEND_EFFECT_DURATION_MS）。 */
+export const CONTEXT_SPEND_ANIMATION_MS = 3000;
 
 /** 超时兜底余量：animationend 丢失时仍能推进队列。 */
 const SPEND_FALLBACK_EXTRA_MS = 400;

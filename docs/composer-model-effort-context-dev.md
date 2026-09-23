@@ -391,126 +391,113 @@ fallback 取值优先级：模型默认档位 > levels 的中间档 > levels[0]
 
 ## 2. 改动二：上下文圆环配色 + 消耗动画
 
-> **已全部按本文档实现**（2026-09）：19px `conic-gradient` 甜甜圈 + 环外右侧数字 +
-> ≤20% 预警斜线弧 + 容器边框分档 + hover 光晕。
+> **按最终交互要求实现**：复用 hover tooltip 的已用百分比 `context.percent`，圆环和右侧数字
+> 使用同一份数据；圆环恢复原先的 14px 紧凑尺寸；所有状态不显示容器边框。
 >
-> 弧长语义为**剩余**（`--ring-angle = left * 3.6`，与原型第 616 行一致）：
-> 消耗时环变短、数字下降；runtime 上报的 `contextPercent` 是**已用**，
-> 由 `contextLeftPercent()` 收口换算（唯一换算点）。
+> tooltip 文案通过 `reading = t("sessionContext.used", { percent: formatPercent(percent) })`
+> 生成，圆环的 `ringPercent` 直接取同一个 `context?.percent`，不再做 `100 - percent` 的剩余量换算。
+> 这样 tooltip 显示「上下文已用 2.3%」时，右侧数字也显示 `2.3%`，不会再出现误导性的 `98%`。
 >
-> **实现前的一条弯路（已纠正，勿重蹈）**：曾一度按「保留 14px SVG 环只换色」
-> 实现，并且把弧长画成了**已用**（`percent * 3.6`）。后果：2.3% 占用时弧长近 0、
-> 看起来仍是灰环，完全丢掉「颜色即状态」——视觉上与未改动无异。
-> 若后续再调环，务必保持：① 19px conic-gradient 甜甜圈；② 弧长画剩余；③ 环外数字。
->
-> **另一个实现陷阱**：这些样式必须写在 `@layer utilities` 而**不能**用 `@utility`。
-> 四条规则都依赖嵌套选择器（`&::after` 挖甜甜圈、`[data-level=…]` 分档、
-> `[data-warn]` 显预警弧），而 Tailwind 的 `@utility` **不会展开嵌套的 `&`**——
-> 它们会被原样写进产物，浏览器不认、**静默失效**（实测：环不变甜甜圈、
-> 五档全灰、预警弧永不出现）。分档的类名也必须是字面量 + 属性选择器：
-> 运行时拼出的 `ctx-level-${level}` 永不被扫描到，CSS 不会生成。
+> 状态色仍由 `contextRingLevel(ringPercent)` 分档并写入 `data-level`，只改变圆环双色和数字色；
+> 容器保持无边框，hover 只保留轻微圆环光晕。扣血动画仍按原规则保留。
 
 ### 2.1 圆环配色
 
 ```css
-/* 容器 */
+/* 容器：原先的 28px 点击区，不带 border */
 position: relative; display: inline-flex; align-items: center; gap: 6px;
 height: 28px; padding: 0 8px 0 5px;
 border-radius: var(--radius-md);
-border: 1px solid transparent;
 background: transparent; cursor: pointer;
-transition: background-color .16s ease, border-color .16s ease;
-/* hover */ background: var(--color-bg-muted);
+transition: background-color .16s ease;
 
-/* 圆环（19px，尺寸与数字位置保持不变） */
-position: relative; width: 19px; height: 19px; border-radius: 50%; flex: none;
+/* 圆环：恢复原先 14px；弧长直接使用 tooltip 的已用百分比 */
+position: relative; width: 14px; height: 14px; border-radius: 50%; flex: none;
 background: conic-gradient(from -90deg,
   var(--ring-a) 0deg,
   var(--ring-b) var(--ring-angle),
   var(--ctx-track) var(--ring-angle) 360deg);
-box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring-a) 22%, transparent);
-transition: box-shadow .2s ease;
-/* 挖空成甜甜圈 */
-.ring::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; background: var(--color-bg-panel); }
-/* hover 光晕 */
-box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-a) 26%, transparent);
 
-/* 数字（★ 保持在环外右侧，不放进环内） */
-font: 700 var(--font-size-caption)/1 var(--font-family-mono);   /* 12px mono */
+/* 2px 内孔对应原先 SVG 的 2px 描边 */
+.ring::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: var(--color-bg-panel); }
+
+/* 数字：保留在环外右侧，与 tooltip 的已用百分比同源 */
+font: 700 var(--font-size-caption)/1 var(--font-family-mono);
 font-variant-numeric: tabular-nums;
 color: var(--color-text-primary);
 ```
 
-**状态 → 色系映射**
+**数据口径**：
 
-| 剩余占用 | 条件 | `--ring-a` | `--ring-b` | 数字色 | 容器边框 |
-|---|---|---|---|---|---|
-| `normal` | `> 60%` | `--ctx-ok`（蓝） | `--ctx-ok2`（紫） | 主文字色 | 透明 |
-| `notice` | `≤ 60%` | `--ctx-warn` | `--ctx-warn2` | warning | warning 30% |
-| `warn` | `≤ 50%` | `--ctx-warn` | `--ctx-warn2` | warning | warn2 48% |
-| `danger` | `≤ 40%` | `--ctx-warn2` | `--ctx-danger` | danger | danger 50% |
-| `critical` | `≤ 30%` | `--ctx-warn2` | `--ctx-danger` | danger | danger 50% |
-
-**新增 token（明暗两套，写入 `foundation.css` token 区）**
-
-| token | 浅色 | 暗色 |
-|---|---|---|
-| `--ctx-track` | `#e4e4e7` | `#2e2e2e` |
-| `--ctx-ok` | `#2563eb` | `#60a5fa` |
-| `--ctx-ok2` | `#7c3aed` | `#a78bfa` |
-| `--ctx-warn` | `#c2820a` | `#eab308` |
-| `--ctx-warn2` | `#ea580c` | `#f97316` |
-| `--ctx-danger` | `#b42318` | `#ef4444` |
-
-**压缩预警弧**（剩余 ≤ 20% 时出现）：环外扩 3px 的一圈斜线条纹，用 `conic-gradient` + `radial-gradient` 遮罩实现。
-
-```css
-position: absolute; inset: -3px; border-radius: 50%;
-opacity: 0; transition: opacity .2s ease;
-background: conic-gradient(from -90deg,
-  transparent 0deg, transparent var(--zone-start),
-  var(--hatch-b) var(--zone-start), var(--hatch-a) 360deg);
--webkit-mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
-        mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
-/* 出现时 */ opacity: 1;
-/* --zone-start = 20 * 3.6 = 72deg（预警阈值对应的角度） */
+```ts
+const percent = context?.percent ?? 0;
+const reading = context !== null ? t("sessionContext.used", { percent: formatPercent(percent) }) : t("sessionContext.unavailable");
+const ringPercent = context?.percent ?? 0;
+const ringAngle = contextRingAngleDeg(ringPercent);
+// 右侧数字：与 reading 使用同一个 ringPercent
+{available ? `${formatPercent(ringPercent)}%` : "--"}
 ```
 
-> `9.5px` 来自：环 19px / 2 = 9.5（`inset:-3px` 后外径 25px，遮罩内半径需为原环半径）。
+**状态 → 色系映射**：`data-level` 只改变圆环双色与数字色，容器不设置状态边框。
 
-### 2.2 消耗动画
+| 已用百分比 | 状态 | `--ring-a` | `--ring-b` |
+|---|---|---|---|
+| `< 40%` | `normal` | `--ctx-ok`（蓝） | `--ctx-ok2`（紫） |
+| `≥ 40%` | `notice` | `--ctx-warn` | `--ctx-warn2` |
+| `≥ 50%` | `warn` | `--ctx-warn` | `--ctx-warn2` |
+| `≥ 60%` | `danger` | `--ctx-warn2` | `--ctx-danger` |
+| `≥ 70%` | `critical` | `--ctx-warn2` | `--ctx-danger` |
+
+**foundation token**（明暗两套）：`--ctx-track`、`--ctx-ok`、`--ctx-ok2`、`--ctx-warn`、
+`--ctx-warn2`、`--ctx-danger`。不新增第二套调色板。
+
+`ctx-ring` 样式放在 `@layer utilities`，因为 `::after` 需要嵌套选择器展开成真实 CSS；
+不要移回 `@utility`。
+
+> **已按上游逐项照搬**（用户要求：完全照搬 `codex-context-used-meter`）。旧实现（13px/800、
+> 1800ms、固定像素位移 `-10px/-52px/-72px`）已废弃——那套参数导致标签偏小、飞不远，
+> 位数多时看不出位移。现全部对齐上游 `.ccm-hit-pop` 的定稿值。
 
 ```css
-/* 关键帧：向左飞（消失曲线取自 codex-context-used-meter 的 ccm-hit-pop，方向改为向左） */
+/* 关键帧：逐字节取自 codex-context-used-meter 的 @keyframes ccm-hit-pop */
 @keyframes context-hit {
-  0%   { opacity: 0; transform: translate(0, -50%)      scale(.68); }
-  11%  { opacity: 1; transform: translate(-10px, -51%)  scale(1);   }
-  70%  { opacity: 1; transform: translate(-52px, -54%)  scale(1.2); }
-  100% { opacity: 0; transform: translate(-72px, -56%)  scale(1.32); }
+  0%   { opacity: 0; transform: translate(-108%, -50%) scale(.72); }
+  12%  { opacity: 1; transform: translate(-114%, -51%) scale(1);   }
+  72%  { opacity: 1; transform: translate(-146%, -54%) scale(1.22); }
+  100% { opacity: 0; transform: translate(-160%, -55%) scale(1.34); }
 }
 
-/* 元素 */
-position: absolute; right: 100%; top: 50%; margin-right: 2px; z-index: 9;
-font: 800 var(--font-size-control)/1 var(--font-family-mono);   /* 13px mono 800 */
+/* 元素（定位与上游一致：相对 meter 左缘、垂直居中） */
+position: absolute; left: 0; top: 50%; z-index: 9;
+font: 850 14px/1 var(--font-family-mono);   /* 上游固定 14px/850，不跟主题缩放 */
 white-space: nowrap; pointer-events: none;
-/* 渐变文字：橙 → 粉 → 红 */
-background: linear-gradient(92deg, #fff7ed 0%, #fecdd3 34%, #fb7185 66%, #f97316 100%);
+text-shadow: 0 0 1px rgba(255,255,255,.45);
+/* 渐变文字：暖白 → 粉 → 橙 */
+background: linear-gradient(92deg, #fff7ed 0%, #fecdd3 38%, #fb7185 68%, #f97316 100%);
 -webkit-background-clip: text; background-clip: text;
 -webkit-text-fill-color: transparent;
-/* 三层发光 */
-filter: drop-shadow(0 1px 0 rgba(0,0,0,.8))
-        drop-shadow(0 3px 9px rgba(0,0,0,.55))
-        drop-shadow(0 0 15px rgba(251,113,133,.55));
-animation: context-hit 1800ms cubic-bezier(.16,.84,.24,1) forwards;
+/* 四层发光（上游原样：1px 硬边 / 8px 投影 / 14px 粉光 / 26px 橙光） */
+filter: drop-shadow(0 1px 0 rgba(0,0,0,.78))
+        drop-shadow(0 3px 8px rgba(0,0,0,.58))
+        drop-shadow(0 0 14px rgba(251,113,133,.56))
+        drop-shadow(0 0 26px rgba(249,115,22,.24));
+animation: context-hit 3000ms cubic-bezier(.16,.84,.24,1) forwards;
 will-change: opacity, transform, filter;
 ```
 
-**浅色主题**：渐变文字在浅底上不可读，换深色渐变：
+> **位移用自身宽度百分比**（`-108%` → `-160%`）而不是固定像素：标签越长飞得越远。
+> 实测（`-1,240 tok`，自身宽 77px）：0% → -0.94W、12% → -1.14W、72% → -1.57W、100% → -1.77W，
+> 与上游四个断点逐点吻合（百分比相对未变换盒子，`scale` 收缩会让左边缘回移，故不是 1.08/1.6）。
+
+**浅色主题**：上游的高亮暖渐变在白底上不可读，PiDeck 换深色渐变（唯一偏离上游之处，
+因为上游只跑在 Codex 的深色页上）：
 
 ```css
 background: linear-gradient(92deg, #9a3412 0%, #dc2626 42%, #ea580c 100%);
 filter: drop-shadow(0 1px 0 rgba(255,255,255,.9))
-        drop-shadow(0 3px 9px rgba(180,35,24,.3));
+        drop-shadow(0 3px 8px rgba(180,35,24,.34))
+        drop-shadow(0 0 14px rgba(251,113,133,.42))
+        drop-shadow(0 0 26px rgba(249,115,22,.2));
 ```
 
 **圆环同步 pulse**（620ms，让「扣血」有主体）：
@@ -528,12 +515,15 @@ filter: drop-shadow(0 1px 0 rgba(255,255,255,.9))
 
 ```css
 @theme {
-  --animate-context-hit: context-hit 1800ms cubic-bezier(.16,.84,.24,1) forwards;
+  --animate-context-hit: context-hit 3000ms cubic-bezier(.16,.84,.24,1) forwards;
   --animate-context-pulse: context-pulse 620ms cubic-bezier(.16,.84,.24,1);
   @keyframes context-hit { /* 见上 */ }
   @keyframes context-pulse { /* 见上 */ }
 }
 ```
+
+> 兜底超时也必须跟着改：`useContextSpendEffects.ts` 的 `CONTEXT_SPEND_ANIMATION_MS`
+> 是 `3000`（上游 `SPEND_EFFECT_DURATION_MS`），否则队列会在动画播完前提前推进。
 
 **队列策略（串行，不得并行叠加）**
 
@@ -566,8 +556,8 @@ export function consumeTokenDelta(input: {
 /** 格式化扣血标签：-1,240 tok */
 export function formatSpendLabel(tokens: number): string;
 
-/** 剩余占用 → 圆环状态（与 §2.1 的表一致） */
-export function contextRingLevel(leftPercent: number): "normal" | "notice" | "warn" | "danger" | "critical";
+/** 已用百分比 → 圆环状态（与 §2.1 的表一致） */
+export function contextRingLevel(usedPercent: number): "normal" | "notice" | "warn" | "danger" | "critical";
 ```
 
 **必须处理的情形（逐条测）**
@@ -670,12 +660,13 @@ export function effortColorVar(effort: string): string {
 - [ ] `pickModel` 后回到一级（不是关闭）
 - [ ] `setPointerCapture` 有 `try/catch`
 
-**上下文**（均已在真实窗口中用 CDP 实测取证）
-- [x] 圆环 `19px`、`inset: 3px`、数字在环外右侧
-- [x] 5 档状态色映射与 §2.1 表一致
-- [x] 预警弧 `inset: -3px`、遮罩内半径 `9.5px`、`--zone-start: 72deg`
-- [x] 弧长画**剩余**（78.4% → 282deg，原型第 616 行口径）
-- [x] 扣血动画 `1800ms`，关键帧 4 个断点与 §2.2 一致
+**上下文**（均已按最终要求验证）
+- [x] 圆环恢复 `14px`，内孔 `inset: 2px`，数字在环外右侧
+- [x] 圆环弧长和右侧数字直接使用 tooltip 同源的 `context.percent`
+- [x] 5 档状态色映射与已用百分比阈值一致
+- [x] 所有状态不显示容器边框
+- [x] 扣血动画 `3000ms`，关键帧 4 个断点与上游 `ccm-hit-pop` 逐点吻合
+- [x] 扣血标签 `14px` / `850` / 四层发光 + 1px 描边（照搬上游 `.ccm-hit-pop`）
 - [x] pulse `620ms`，峰值 `scale(1.22)` 在 `28%`
 - [x] 队列串行；`animationend` + `setTimeout` 双保险
 - [x] 压缩回落 / 重复读数 / 会话切换均不触发（纯函数单测覆盖）

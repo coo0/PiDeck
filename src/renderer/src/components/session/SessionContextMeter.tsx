@@ -11,14 +11,13 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui-shadcn/tooltip";
 import { ProviderUsageDetails } from "../app/ProviderUsageDetails";
 import { buildSessionStatusDetail } from "./SurfaceComponents";
 import { formatPercent } from "./TimelineFormat";
-import { contextLeftPercent, contextLevelAttribute, contextRingAngleDeg, contextRingLevel, showContextWarnArc, CONTEXT_WARN_ZONE_START_DEG } from "../../utils/contextSpend";
+import { contextLevelAttribute, contextRingAngleDeg, contextRingLevel } from "../../utils/contextSpend";
 import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
 
 /**
  * composer 发送按钮旁的上下文占用圆环（移植自 dsh-web ContextMeter）。
  *
- * 形态：14px 圆环（2px 描边，strokeDasharray 按占用比例填充，从 12 点方向起笔），
- * 28px 圆形点击区；点击弹出占用面板：
+ * 形态：原先的 14px 紧凑圆环（2px 环宽），28px 点击区；点击弹出占用面板：
  * - 标题「上下文已用 45%」+ ~used/window 数字 + 4px 占用条；
  * - 两段占比图例「对话 / 系统 + 工具」：pi 不返回 prompt 构成，对话按会话文件
  *   消息字符 ÷ 4 估算（contextMessageTokens，主进程算好），系统+工具为反推值
@@ -37,17 +36,15 @@ import { useContextSpendEffects } from "../../hooks/useContextSpendEffects";
  *   面板内容降级为「上下文数据暂不可用」，不再整环隐藏。
  * - 命中率/输入输出行按数据存在性渲染，缺字段不占位。
  *
- * 颜色即状态（2026-09）：环身用 19px 双色 conic-gradient 甜甜圈
- * （normal 蓝紫 / 预警黄橙 / 危险橙红），**弧长画「剩余」**（原型
- * `--ring-angle = left * 3.6`）——消耗时环变短，剩余 ≤20% 时环外浮出斜线预警弧。
- * 环外右侧常驻百分比数字（也是剩余口径）。
+ * 颜色即状态（2026-09）：圆环恢复原先的 14px 几何，弧长和右侧数字直接复用
+ * tooltip 的已用百分比 `context.percent`；不再换算剩余量。容器不显示状态边框。
  * 新消耗时从圆环向左飞出 `-N tok`（队列串行，见 useContextSpendEffects）：
  * 同一读数重复上报、压缩后回落、会话切换均不触发。
  */
 
-/** 圆环几何（19px 外径 / 3px 环宽 / 甜甜圈内孔 13px）定义在 tailwind.css 的
- *  `ctx-ring` utility 里：conic-gradient 角度变量 + color-mix 描边 + mask 挖孔
- *  无法用原子类表达，因此几何与色值一并归 CSS；TS 侧只提供角度与分档。 */
+/** 圆环几何（14px 外径 / 2px 环宽 / 原先的紧凑尺寸）定义在 tailwind.css 的
+ * `ctx-ring` utility 里：conic-gradient 角度变量 + 伪元素挖孔。
+ * TS 侧只提供直接来自 tooltip 的已用百分比与状态分档。 */
 /** 两段图例色：对话=蓝、系统+工具=紫（dsh ROWS 的 messages/tools 色系）。 */
 const COLOR_CONVERSATION = "var(--color-context-conversation, #2563eb)";
 const COLOR_SYSTEM_TOOLS = "var(--color-context-system-tools, rgb(167, 139, 250))";
@@ -285,11 +282,10 @@ export function SessionContextMeter(props: {
 					return parts.filter((part) => part.tokens > 0).map((part) => ({ key: part.key, color: part.color, width: Math.min(100, (percent * part.tokens) / breakdownTotal) }));
 				})()
 			: undefined;
-	// 圆环颜色/弧长都以**剩余**为准（原型语义）：runtime 上报的是已用，先换算。
-	const leftPercent = contextLeftPercent(context?.percent ?? 0);
-	const ringLevel = contextRingLevel(leftPercent);
-	const ringAngle = contextRingAngleDeg(leftPercent);
-	const warnArc = showContextWarnArc(leftPercent);
+	// 圆环与 tooltip 共用同一份已用百分比，不再换算成剩余量。
+	const ringPercent = context?.percent ?? 0;
+	const ringLevel = contextRingLevel(ringPercent);
+	const ringAngle = contextRingAngleDeg(ringPercent);
 	// 扣血动画：相邻两帧的正向增量才触发（重复读数/压缩回落/会话切换都不触发）。
 	const spend = useContextSpendEffects({ sessionId: props.sessionId, tokens: props.state?.contextTokens });
 	const showCompact = props.onCompact !== undefined;
@@ -302,7 +298,11 @@ export function SessionContextMeter(props: {
 
 	return (
 		<span ref={rootRef} className="relative inline-flex" data-testid="session-context-meter">
-			{/* 扣血数字：从圆环向左飞出（-N tok），1800ms 放大淡出；队列串行保证同时只有一条。
+			{/* 扣血数字：从圆环向左飞出（-N tok）。
+			    尺寸/字重/位移曲线**逐项对齐 codex-context-used-meter 的 .ccm-hit-pop**：
+			    14px / font-weight 850 / 3000ms，位移用自身宽度百分比（translate -108% → -160%），
+			    标签越长飞得越远；四层发光 + 1px 描边光晕保证发光里仍有实心感。
+			    定位与上游一致：相对 meter 左缘、垂直居中（left-0 top-1/2），
 			    key=pulseKey 重挂元素以重启动画（同一标签连续两次也要重播）；
 			    animationend 推进队列，hook 内另有超时兜底（动画被中断时不卡死）。 */}
 			{spend.spendLabel !== null && (
@@ -310,8 +310,10 @@ export function SessionContextMeter(props: {
 					key={spend.pulseKey}
 					data-testid="session-context-spend"
 					onAnimationEnd={spend.onSpendAnimationEnd}
-					className="animate-context-hit pointer-events-none absolute top-1/2 right-full z-[9] mr-0.5 bg-clip-text font-mono text-control font-extrabold leading-none whitespace-nowrap text-transparent"
-					style={{ backgroundImage: "var(--ctx-spend-gradient)", filter: "var(--ctx-spend-glow)" }}
+					/* text-[14px] / font-[850] 是上游固定值，故意不用 --font-size-* 语义 token：
+					   该浮层是固定尺寸的动画标签，跟主题的正文缩放走会让位移距离变样。 */
+					className="animate-context-hit pointer-events-none absolute top-1/2 left-0 z-[9] bg-clip-text font-mono text-[14px] font-[850] leading-none whitespace-nowrap text-transparent [text-shadow:var(--ctx-spend-text-shadow)]"
+					style={{ backgroundImage: "var(--ctx-spend-gradient)", filter: "var(--ctx-spend-glow)", willChange: "opacity, transform, filter" }}
 				>
 					{spend.spendLabel}
 				</span>
@@ -321,9 +323,8 @@ export function SessionContextMeter(props: {
 					<button
 						ref={triggerRef}
 						type="button"
-						/* 容器带分档 class（驱动双色变量 + 边框）+ data-level；
-						   环与数字作为子元素，padding 与原型一致（0 8px 0 5px）。 */
-						className={`ctx-ring-host flex h-7 flex-none items-center gap-1.5 rounded-md border border-transparent bg-transparent pt-px pr-2 pb-px pl-[5px] transition-colors hover:bg-muted/60`}
+						/* 原先的 14px 圆环 + tooltip 同源的已用百分比；不显示状态边框。 */
+						className="ctx-ring-host flex h-7 flex-none items-center gap-1.5 rounded-md bg-transparent pt-px pr-2 pb-px pl-[5px] transition-colors hover:bg-muted/60"
 						data-level={contextLevelAttribute(ringLevel)}
 						aria-label={reading}
 						aria-haspopup="dialog"
@@ -332,14 +333,10 @@ export function SessionContextMeter(props: {
 							setOpen((value) => !value);
 						}}
 					>
-						{/* 19px 双色 conic-gradient 甜甜圈：弧长 = **剩余**（--ring-angle）
-						   颜色即状态；消耗时环变短，≤20% 时环外浮出斜线预警弧。 */}
-						<span data-testid="session-context-ring" aria-hidden="true" className={`ctx-ring${spend.spendLabel !== null ? " animate-context-pulse" : ""}`} style={{ "--ring-angle": `${ringAngle}deg`, "--zone-start": `${CONTEXT_WARN_ZONE_START_DEG}deg` } as CSSProperties}>
-							<span data-warn={warnArc ? "true" : "false"} className="ctx-ring-warnarc" />
-						</span>
-						{/* 数字在环**外右侧**（★ 不放进环内）：剩余百分比 */}
+						{/* 14px 圆环：弧长和右侧数字都直接使用 tooltip 的已用百分比。 */}
+						<span data-testid="session-context-ring" aria-hidden="true" className={`ctx-ring${spend.spendLabel !== null ? " animate-context-pulse" : ""}`} style={{ "--ring-angle": `${ringAngle}deg` } as CSSProperties} />
 						<span data-testid="session-context-percent" className="ctx-ring-pct">
-							{available ? `${formatPercent(leftPercent)}%` : "--"}
+							{available ? `${formatPercent(ringPercent)}%` : "--"}
 						</span>
 					</button>
 				</TooltipTrigger>

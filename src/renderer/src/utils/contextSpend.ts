@@ -36,52 +36,26 @@ export function consumeTokenDelta(input: { prevTokens?: number | null; nextToken
 export type ContextRingLevel = "normal" | "notice" | "warn" | "danger" | "critical";
 
 /**
- * 剩余占用 → 圆环状态（阈值与 dev 文档 §2.1 表一致）。
- *
- * 语义是「剩余百分比」（left），不是已用：剩余越低越危险。
+ * 已用百分比 → 圆环状态（阈值与 dev 文档 §2.1 表一致）。
  * 非有限值按 normal 处理（无数据时圆环走占位态，不误报危险）。
  */
-export function contextRingLevel(leftPercent: number): ContextRingLevel {
-	if (!Number.isFinite(leftPercent)) return "normal";
-	if (leftPercent <= 30) return "critical";
-	if (leftPercent <= 40) return "danger";
-	if (leftPercent <= 50) return "warn";
-	if (leftPercent <= 60) return "notice";
+export function contextRingLevel(usedPercent: number): ContextRingLevel {
+	if (!Number.isFinite(usedPercent)) return "normal";
+	if (usedPercent >= 70) return "critical";
+	if (usedPercent >= 60) return "danger";
+	if (usedPercent >= 50) return "warn";
+	if (usedPercent >= 40) return "notice";
 	return "normal";
 }
 
 /**
- * 已用百分比 → 剩余百分比。
- *
- * 原型里圆环的弧长、数字、tooltip 都以**剩余**为准（`state.left = 78.4`
- * → `--ring-angle: 282deg`），而 runtime 上报的是**已用**（`contextPercent`）。
- * 本函数是两者之间的唯一换算点，避免各处散写 `100 - percent`。
+ * 已用百分比 → conic-gradient 角度（从 12 点方向顺时针）。
+ * 圆环与 tooltip 直接共用 runtime 的 contextPercent，不做剩余量换算。
  */
-export function contextLeftPercent(usedPercent: number): number {
-	if (!Number.isFinite(usedPercent)) return 100;
-	return Math.max(0, Math.min(100, 100 - usedPercent));
+export function contextRingAngleDeg(usedPercent: number): number {
+	if (!Number.isFinite(usedPercent)) return 0;
+	return Math.max(0, Math.min(100, usedPercent)) * 3.6;
 }
-
-/**
- * 剩余百分比 → conic-gradient 角度（从 12 点方向顺时针）。
- * 原型：`--ring-angle = left * 3.6`（78.4 → 282deg）。
- * **画的是剩余**：消耗时环变短，与 tooltip 的「剩余」口径一致。
- */
-export function contextRingAngleDeg(leftPercent: number): number {
-	if (!Number.isFinite(leftPercent)) return 0;
-	return Math.max(0, Math.min(100, leftPercent)) * 3.6;
-}
-
-/** 压缩预警阈值（剩余百分比）：跌破它时圆环外圈浮出斜线弧。 */
-export const CONTEXT_WARN_LEFT_PERCENT = 20;
-
-/** 是否展示压缩预警弧（剩余 ≤ 20%）。 */
-export function showContextWarnArc(leftPercent: number): boolean {
-	return Number.isFinite(leftPercent) && leftPercent <= CONTEXT_WARN_LEFT_PERCENT;
-}
-
-/** 预警弧的起始角度（原型 `--zone-start: 72deg` = 20 * 3.6）。 */
-export const CONTEXT_WARN_ZONE_START_DEG = CONTEXT_WARN_LEFT_PERCENT * 3.6;
 
 /**
  * 圆环双色（起点 → 终点）的 CSS 变量引用：颜色即状态。
@@ -104,11 +78,8 @@ export function contextRingColorVars(level: ContextRingLevel): { a: string; b: s
 }
 
 /**
- * 分档 → 容器 `data-level` 值（驱动边框与数字色的 CSS 选择器）。
- *
- * 为什么保留这个恒等映射：分档公式在 TS，而边框/数字色的具体样式在
- * `foundation.css`（明暗两套 + color-mix），两边靠 `data-level` 这个契约对齐。
- * 收成一个导出值是让「哪几档存在」只有一处定义，新增档位不会漏改 CSS。
+ * 分档 → 圆环容器的 `data-level` 值（驱动圆环双色变量与数字色的 CSS 选择器）。
+ * 圆环不使用状态边框，data-level 只负责环身/数字颜色。
  */
 export function contextLevelAttribute(level: ContextRingLevel): string {
 	return level;

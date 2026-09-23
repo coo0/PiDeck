@@ -151,14 +151,13 @@
   --ctx-warn: #c2820a;
   --ctx-warn2: #ea580c;
   --ctx-danger: #b42318;
-  /* 压缩预警斜线弧（剩余 ≤20%）：暖黄→橙的条纹。 */
-  --hatch-a: rgba(253, 224, 71, 0.75);
-  --hatch-b: rgba(251, 146, 60, 0.68);
-  /* 扣血数字（`-N tok`）的渐变文字与发光：
-     浅色主题下原型的高亮暖色渐变在白底上不可读，换成深色暖渐变；
-     暗色主题用亮色渐变 + 三层发光（见暗色块）。 */
+  /* 扣血数字（`-N tok`）的渐变文字与发光（对齐 codex-context-used-meter 的 .ccm-hit-pop）：
+     浅色主题下上游的高亮暖色渐变在白底上不可读，换成深色暖渐变（PiDeck 自适配）；
+     暗色主题与上游逐项一致：4 个断点的暖渐变 + 四层发光（见暗色块）。 */
   --ctx-spend-gradient: linear-gradient(92deg, #9a3412 0%, #dc2626 42%, #ea580c 100%);
-  --ctx-spend-glow: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 3px 9px rgba(180, 35, 24, 0.3));
+  --ctx-spend-glow: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.9)) drop-shadow(0 3px 8px rgba(180, 35, 24, 0.34)) drop-shadow(0 0 14px rgba(251, 113, 133, 0.42)) drop-shadow(0 0 26px rgba(249, 115, 22, 0.2));
+  /* 描边光晕：上游 `text-shadow: 0 0 1px` 让字在发光里仍有实心感。 */
+  --ctx-spend-text-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
   /* 模型选择器行的悬停高亮（浅绿）：与 --color-bg-hover 的灰不同，
      用于区分「模型列表行」与普通菜单项（原型 --row-active）。 */
   --row-active: #eef2e8;
@@ -537,11 +536,11 @@
   --ctx-warn: #eab308;
   --ctx-warn2: #f97316;
   --ctx-danger: #ef4444;
-  --hatch-a: rgba(253, 224, 71, 0.55);
-  --hatch-b: rgba(251, 146, 60, 0.5);
-  /* 扣血数字暗色档：亮色暖渐变（橙→粉→红）+ 三层发光，深底上才读得清。 */
-  --ctx-spend-gradient: linear-gradient(92deg, #fff7ed 0%, #fecdd3 34%, #fb7185 66%, #f97316 100%);
-  --ctx-spend-glow: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.8)) drop-shadow(0 3px 9px rgba(0, 0, 0, 0.55)) drop-shadow(0 0 15px rgba(251, 113, 133, 0.55));
+  /* 扣血数字暗色档：与上游 .ccm-hit-pop 逐项一致——亮色暖渐变（4 断点）
+     + 四层发光（1px 硬边 / 8px 投影 / 14px 粉光 / 26px 橙光）。 */
+  --ctx-spend-gradient: linear-gradient(92deg, #fff7ed 0%, #fecdd3 38%, #fb7185 68%, #f97316 100%);
+  --ctx-spend-glow: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.78)) drop-shadow(0 3px 8px rgba(0, 0, 0, 0.58)) drop-shadow(0 0 14px rgba(251, 113, 133, 0.56)) drop-shadow(0 0 26px rgba(249, 115, 22, 0.24));
+  --ctx-spend-text-shadow: 0 0 1px rgba(255, 255, 255, 0.45);
   --row-active: #2b2f26;
   /* 引用 chip 身份色暗色档：比浅色提亮一档，保证在深灰底上有足够辨识度
      （实测文字/底色 5.2~7.7:1，均达 AA）。 */

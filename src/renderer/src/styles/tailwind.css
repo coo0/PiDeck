@@ -323,97 +323,64 @@
 }
 
 /* ── 上下文圆环（composer 发送按钮旁的状态指示）─────────────────────
- * 19px 双色 conic-gradient 甜甜圈：**颜色即状态**（normal 蓝紫 / 预警黄橙 /
- * 危险橙红），弧长画**剩余**（原型 `--ring-angle = left * 3.6`）；剩余 ≤20%
- * 时环外浮出斜线预警弧。
+ * 14px 紧凑圆环，直接复用 tooltip 的已用百分比：弧长与右侧数字均来自
+ * runtime 的 contextPercent；不显示状态边框，不再换算剩余量。
  *
- * 为何用 @layer utilities 而不是 @utility：这里必须用嵌套选择器
- * （`&::after` 挖甜甜圈、`[data-level=…]` 分档、`[data-warn]` 显示预警弧），
- * 而 Tailwind 的 `@utility` **不会展开嵌套的 `&` 规则**——它们会被原样写进
- * 产物，浏览器不认、静默失效（实测：环不变甜甜圈、五档全灰、预警弧永不出现）。
- * `@layer utilities` 参与 Tailwind 的嵌套处理，产物是真实 CSS。
- * 色值仍全部取自 foundation 的 --ctx-* 语义 token（不新建调色板）。
- * 分档靠容器的 data-level（见 utils/contextSpend.ts 的 contextLevelAttribute）。 */
+ * 这里仍使用 @layer utilities：`&::after` 需要被展开为真实的伪元素选择器，
+ * 否则 Tailwind 的 @utility 会把嵌套选择器原样输出，甜甜圈内孔会静默失效。
+ * data-level 只驱动环身和数字的状态色，不驱动边框。
+ */
 @layer utilities {
   .ctx-ring {
     position: relative;
-    width: 19px;
-    height: 19px;
+    width: 14px;
+    height: 14px;
     flex: none;
     border-radius: 50%;
-    /* 已消耗部分为轨道色，剩余部分是双色渐变：环越短 = 剩余越少 */
     background: conic-gradient(from -90deg, var(--ring-a) 0deg, var(--ring-b) var(--ring-angle), var(--ctx-track) var(--ring-angle) 360deg);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--ring-a) 22%, transparent);
     transition: box-shadow 0.2s ease;
   }
 
-  /* 挖空成甜甜圈：内孔填面板底色（19 - 3*2 = 13px 内径） */
+  /* 原先 14px SVG 环的 2px 描边对应 2px 内缩，保留紧凑视觉尺寸。 */
   .ctx-ring::after {
     content: "";
     position: absolute;
-    inset: 3px;
+    inset: 2px;
     border-radius: 50%;
     background: var(--color-bg-panel);
   }
 
-  /* hover 光晕（同色 26%）：五档共用一条规则 */
   .ctx-ring-host:hover .ctx-ring {
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring-a) 26%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--ring-a) 24%, transparent);
   }
 
-  /* 剩余 ≤20% 的压缩预警弧：环外扩 3px 的一圈斜线条纹。
-   * 遮罩内半径 9.5px = 原环半径（19/2），保证斜线只画在环身之外那一圈。 */
-  .ctx-ring-warnarc {
-    position: absolute;
-    inset: -3px;
-    border-radius: 50%;
-    opacity: 0;
-    transition: opacity 0.2s ease;
-    background: conic-gradient(from -90deg, transparent 0deg, transparent var(--zone-start), var(--hatch-b) var(--zone-start), var(--hatch-a) 360deg);
-    -webkit-mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
-    mask: radial-gradient(circle, transparent 0 9.5px, #000 9.5px);
-  }
-
-  .ctx-ring-warnarc[data-warn="true"] {
-    opacity: 1;
-  }
-
-  /* 分档 → 双色变量 + 容器边框（明暗由 token 自动跟随）。
-   * 用一个类 + [data-level] 而不是五个 ctx-level-* 类：Tailwind 只会在扫到
-   * **字面量**类名时按需生成 @utility，而分档是运行时算出来的
-   * （`ctx-level-${level}`），拼出来的类名永远扫不到 → CSS 不生成、环变全灰。
-   * 属性选择器既是原型自身的写法（.ctx[data-level="notice"]），也让字面量只有一处。 */
+  /* 分档只改变圆环与右侧数字颜色；容器始终无状态边框。 */
   .ctx-ring-host[data-level="normal"] {
     --ring-a: var(--ctx-ok);
     --ring-b: var(--ctx-ok2);
-    border-color: transparent;
   }
 
   .ctx-ring-host[data-level="notice"] {
     --ring-a: var(--ctx-warn);
     --ring-b: var(--ctx-warn2);
-    border-color: color-mix(in srgb, var(--ctx-warn) 30%, transparent);
   }
 
   .ctx-ring-host[data-level="warn"] {
     --ring-a: var(--ctx-warn);
     --ring-b: var(--ctx-warn2);
-    border-color: color-mix(in srgb, var(--ctx-warn2) 48%, transparent);
   }
 
   .ctx-ring-host[data-level="danger"] {
     --ring-a: var(--ctx-warn2);
     --ring-b: var(--ctx-danger);
-    border-color: color-mix(in srgb, var(--ctx-danger) 50%, transparent);
   }
 
   .ctx-ring-host[data-level="critical"] {
     --ring-a: var(--ctx-warn2);
     --ring-b: var(--ctx-danger);
-    border-color: color-mix(in srgb, var(--ctx-danger) 50%, transparent);
   }
 
-  /* 圆环外右侧的数字：等宽 + tabular-nums（宽度不随数值抖动）。 */
+  /* 数字保留在环外右侧，和 tooltip 的「上下文已用 N%」同源。 */
   .ctx-ring-pct {
     font-family: var(--font-family-mono);
     font-size: var(--font-size-caption);
@@ -456,32 +423,33 @@
 }
 
 /* ── 上下文消耗扣血动画（圆环向左飞出 -N tok）───────────────────────
- * 信息反馈（告知刚消耗了多少），不是装饰：新消耗产生时从圆环向左飞出，
- * 1800ms 放大淡出；队列串行（见 hooks/useContextSpendEffects.ts），
- * 圆环同步 pulse 620ms 让「扣血」有主体。
- * 关键帧断点取自 codex-context-used-meter 的 ccm-hit-pop（方向改为向左），
- * 时长/缓动与 docs/composer-model-effort-context-dev.md §2.2 一致。
+ * 信息反馈（告知刚消耗了多少），不是装饰：新消耗产生时从圆环向左飞出。
+ * **逐项照搬 codex-context-used-meter 的 `ccm-hit-pop`**（用户要求视觉一致）：
+ * 14px / font-weight 850 / 3000ms / scale(.72 → 1 → 1.22 → 1.34) /
+ * translate(-108% → -114% → -146% → -160%)——位移用**自身宽度百分比**而不是
+ * 固定像素，标签越长飞得越远，无论几位数都能飞离圆环。
+ * 队列串行见 hooks/useContextSpendEffects.ts；圆环同步 pulse 让「扣血」有主体。
  * 减少动效在 hook 层直接跳过入队（不做静态残留），此处不加 media 分支。 */
 @theme {
-  --animate-context-hit: context-hit 1800ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
+  --animate-context-hit: context-hit 3000ms cubic-bezier(0.16, 0.84, 0.24, 1) forwards;
   --animate-context-pulse: context-pulse 620ms cubic-bezier(0.16, 0.84, 0.24, 1);
 
   @keyframes context-hit {
     0% {
       opacity: 0;
-      transform: translate(0, -50%) scale(0.68);
+      transform: translate(-108%, -50%) scale(0.72);
     }
-    11% {
+    12% {
       opacity: 1;
-      transform: translate(-10px, -51%) scale(1);
+      transform: translate(-114%, -51%) scale(1);
     }
-    70% {
+    72% {
       opacity: 1;
-      transform: translate(-52px, -54%) scale(1.2);
+      transform: translate(-146%, -54%) scale(1.22);
     }
     100% {
       opacity: 0;
-      transform: translate(-72px, -56%) scale(1.32);
+      transform: translate(-160%, -55%) scale(1.34);
     }
   }
 

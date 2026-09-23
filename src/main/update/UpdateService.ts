@@ -13,7 +13,7 @@ import type { AppUpdateDeliveryMode, AppUpdateDownloadState, AppUpdateStatusSnap
 import type { PiUpdateCheckResult } from "../../shared/types";
 import type { CatalogCheckResult } from "../../shared/types/catalog";
 import type { SettingsStore } from "../settings/SettingsStore";
-import { normalizeUpdateSource, normalizeCustomMirrorHost, updateSourceFeedUrl, updateSourceLatestReleaseUrl } from "./updateSources";
+import { normalizeCustomMirrorHost } from "./updateSources";
 import type { AutoUpdaterLike } from "./autoUpdaterTypes";
 
 export type AppCheckResult = { latestVersion: string; hasUpdate: boolean };
@@ -208,15 +208,21 @@ export class UpdateService {
 	}
 
 	/**
-	 * 切换更新源（设置保存后立即调用）：镜像 → generic feed URL；
-	 * 回 GitHub → setFeedUrl(null) 恢复原生 provider。
+	 * 应用「应用更新源」偏好。
+	 *
+	 * 本 fork 的应用更新**固定**走 GitHub 原生 provider（`github.com/coo0/PiDeck`，坐标来自
+	 * `build.publish` → `app-update.yml`），不使用 `settings.updateSource` 的镜像分支：
+	 * atomgit 分支拼的是上游 `atomgit.com/ayuayue/PiDeck`，而本 fork 没有 AtomGit 镜像，
+	 * 切过去只会把 feed 指向一个不存在的 Release。
+	 *
+	 * 保留方法名与调用点：设置保存与启动仍会调用它，此处只负责把 feed 复位到原生通道。
+	 * `settings.updateSource` 仍然驱动全部**内容**更新（模型目录 / 内置扩展 / DSH runtime 等）。
 	 */
 	applyUpdateSource(): void {
 		if (this.deliveryMode !== "automatic") return;
-		const settings = this.deps.settingsStore.get();
-		const source = normalizeUpdateSource(settings.updateSource);
-		const feedUrl = updateSourceFeedUrl(source);
-		this.getAutoUpdater().setFeedUrl(feedUrl);
+		// null = 原生 GitHub provider（app-update.yml / build.publish 的 coo0 坐标）。
+		// 显式传入的 env/E2E feed 由 createRealAutoUpdater 的 feedOverride 保护，不受影响。
+		this.getAutoUpdater().setFeedUrl(null);
 	}
 
 	/** 记录「已提示过该版本」（渲染层 toast 展示后调用，实现每版本只提示一次）。 */
@@ -393,10 +399,9 @@ export class UpdateService {
 
 	private async checkApp(): Promise<AppCheckResult> {
 		if (this.deliveryMode === "manual") {
-			const settings = this.deps.settingsStore.get();
-			const source = normalizeUpdateSource(settings.updateSource);
-			const releaseUrl = updateSourceLatestReleaseUrl(source);
-			const result = await this.getManualChecker()(releaseUrl ?? undefined);
+			// 本 fork 的 macOS 手动检查固定走应用坐标的 `/releases/latest`（releaseRepo → coo0），
+			// 不按 settings.updateSource 切 AtomGit（fork 无镜像）。
+			const result = await this.getManualChecker()();
 			this.lastApp = result;
 			this.download = result.hasUpdate ? { phase: "available", version: result.latestVersion } : emptyDownloadState();
 			this.pushSnapshot();

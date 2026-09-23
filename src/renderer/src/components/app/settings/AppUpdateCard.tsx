@@ -15,14 +15,17 @@ type AppUpdateCardProps = {
 	appVersion: string;
 	/** 当前运行平台；macOS 无签名发行物使用手动更新交付。 */
 	platform: AppInfo["platform"];
-	/** 由主进程统一提供的受信任 Release 页面地址。 */
+	/** 由主进程统一提供的受信任 Release 页面地址（fork 坐标：github.com/coo0/PiDeck）。 */
 	releasesUrl: string;
 	/**
 	 * 启动时检测的安装类型。Win 便携版应用内更新仍走 NSIS setup
 	 * （会装成安装版），需在 UI 说清区别；不改 deliveryMode。
 	 */
 	installationType?: "portable" | "installed";
-	/** 当前更新源；官方 GitHub 直连失败时提示切镜像，不做自动回退。 */
+	/**
+	 * 内容更新源（模型目录 / 内置扩展 / DSH runtime 等）。
+	 * 与应用更新无关——应用更新固定走 GitHub 原生通道（fork 坐标）。
+	 */
 	updateSource?: UpdateSourceId;
 	/** 检查中（主进程快照 phase=checking 的渲染层派生，按钮 loading 用）。 */
 	checking: boolean;
@@ -122,11 +125,11 @@ export function AppUpdateCard(props: AppUpdateCardProps) {
 				</div>
 			)}
 
-			{/* error：失败可重试；官方 GitHub 直连失败只提示切镜像，不自动回退。 */}
+			{/* error：失败可重试；应用更新固定走 GitHub，直连失败引导去 Release 手动下载。 */}
 			{download && download.phase === "error" && (
 				<div className="mt-2 flex flex-col gap-1">
 					<p className="text-caption text-destructive">{t(download.errorKind === "download" ? "update.downloadFailedDetail" : "update.checkFailedDetail", { error: download.error ?? t("common.unknown") })}</p>
-					{props.updateSource === "github" && <p className="text-caption text-muted-foreground">{t("settings.updateGithubFailHint")}</p>}
+					<p className="text-caption text-muted-foreground">{t("settings.updateGithubFailHint")}</p>
 					<div className="flex gap-2">
 						<Button variant="ghost" size="sm" onClick={props.onCheckUpdate}>
 							{t("settings.checkUpdateRetry")}

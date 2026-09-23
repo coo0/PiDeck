@@ -1,0 +1,198 @@
+name: Fork Release
+
+# fork 自有发版流水线（与上游 release.yml 解耦，不改动上游文件）。
+#
+# 为什么另开一个而不是复用上游 release.yml：
+#   1. 上游 release.yml 依赖 RELEASE_PAT / ATOMGIT_TOKEN（fork 没有，且不该有）；
+#   2. 上游用 softprops 发布正式版并广播事件给 AtomGit 同步——fork 不镜像 AtomGit；
+#   3. 上游打 5 个平台，fork 只发 macOS + Windows（用户决策）。
+# 本文件是新增文件，上游没有同名文件，因此不会在同步上游时产生冲突。
+#
+# 产物形态：**draft Release**。自动同步只负责把 custom 更新到最新，发版必须人工点
+# 「Publish」确认（版本号/变更说明是人做的决定）。想全自动就把 draft 改成 false。
+#
+# 版本号约定：fork 用 `X.Y.Z-custom.N` 避开上游 tag 命名空间（如 v0.7.7-custom.1）。
+# 带预发布后缀会让 electron-updater 的 allowPrerelease=true，但更新检查按
+# compareVersions 语义比较（预发布低于同号正式版），不会把用户拉回上游版本。
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag（如 v0.7.7-custom.1）；留空 = 用 package.json 版本生成 v<version>-custom.<run_number>"
+        required: false
+        type: string
+        default: ""
+      ref:
+        description: "构建用 ref（默认 custom）"
+        required: false
+        type: string
+        default: "custom"
+      platforms:
+        description: "构建平台"
+        required: false
+        type: choice
+        default: both
+        options:
+          - both
+          - macos
+          - windows
+      draft:
+        description: "发布为 draft（推荐：人工确认后再 Publish）"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    name: Resolve version and tag
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || 'custom' }}
+
+      - name: Resolve tag and version
+        id: resolve
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            # 留空 → 基于 package.json 版本 + 运行号，保证每次都能得到唯一 tag
+            BASE="${PKG_VERSION%%-*}"
+            TAG="v${BASE}-custom.${{ github.run_number }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "ref=${{ inputs.ref || 'custom' }}" >> "$GITHUB_OUTPUT"
+          echo "Resolved tag=${TAG} version=${VERSION} ref=${{ inputs.ref || 'custom' }}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: resolve
+    if: ${{ inputs.platforms == 'both' || inputs.platforms == matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows
+            name: Windows x64
+            os: windows-latest
+            command: npm run build && npx electron-builder --win nsis portable zip --x64 --publish never
+          - platform: macos
+            name: macOS arm64
+            os: macos-latest
+            command: npm run build && npx electron-builder --mac dmg zip --arm64 --publish never
+          - platform: macos
+            name: macOS x64
+            os: macos-latest
+            command: npm run build && npx electron-builder --mac dmg zip --x64 --publish never
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # 把 tag 的版本写回 package.json 再构建。
+      # 为什么必须做：electron-updater 的 GitHub provider 按「预发布 channel」匹配 release
+      # （当前版本 0.7.7-custom.1 → channel=custom → 只认 tag 里带 -custom 的 release）。
+      # 若 package.json 还是上游的 0.7.7，channel 会变成 null/beta，永远匹配不到自己的
+      # release，表现为「检测更新永远说已是最新」。同时产物文件名与 latest.yml 的 version
+      # 也取自 package.json，必须与 tag 一致。
+      - name: Stamp version from tag
+        shell: bash
+        env:
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          node -p "'package.json version → ' + require('./package.json').version"
+
+      - name: Generate app icon
+        run: npm run make-icon
+
+      - name: Build packages
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ${{ matrix.command }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fork-release-${{ matrix.platform }}-${{ strategy.job-index }}
+          path: |
+            release/*.exe
+            release/*.zip
+            release/*.dmg
+            release/*.blockmap
+            release/latest*.yml
+          if-no-files-found: warn
+
+  publish:
+    name: Create draft release
+    needs: [resolve, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la artifacts
+
+      # 用 GITHUB_TOKEN 而非 PAT：本 fork 的 Release 不需要广播事件给其它 workflow
+      # （AtomGit 同步在 fork 上不存在），默认 token 足够且有 contents: write。
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.resolve.outputs.tag }}
+          name: ${{ needs.resolve.outputs.tag }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: ${{ inputs.draft }}
+          prerelease: true
+          fail_on_unmatched_files: false
+          generate_release_notes: true
+          body: |
+            PiDeck fork 构建（${{ needs.resolve.outputs.tag }}）。
+
+            基于上游 `ayuayue/PiDeck` 同步而来，包含本 fork 的自有改动。
+
+            - 安装包：Windows（NSIS / portable / zip）、macOS（dmg / zip，arm64 + x64）
+            - 应用内更新指向本 fork 的 Release
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.zip
+            artifacts/**/*.dmg
+            artifacts/**/*.blockmap
+            artifacts/**/latest*.yml

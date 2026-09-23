@@ -103,6 +103,7 @@
     "prepare": "node scripts/install-git-hooks.mjs",
     "hooks:install": "node scripts/install-git-hooks.mjs",
     "sync:main": "node scripts/sync-main.mjs",
+    "sync:upstream": "node scripts/sync-upstream.mjs",
     "typecheck": "tsc --noEmit",
     "make-icon": "node scripts/make-icon.js",
     "compile-exe": "node scripts/compile-exe.js",
@@ -270,7 +271,7 @@
     },
     "publish": {
       "provider": "github",
-      "owner": "ayuayue",
+      "owner": "coo0",
       "repo": "PiDeck"
     }
   },

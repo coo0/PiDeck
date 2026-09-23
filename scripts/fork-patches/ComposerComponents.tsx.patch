@@ -1,14 +1,8 @@
 diff --git a/src/renderer/src/components/session/ComposerComponents.tsx b/src/renderer/src/components/session/ComposerComponents.tsx
-index 7839db88..8f5f1992 100644
+index 23fb06bf..08267c2c 100644
 --- a/src/renderer/src/components/session/ComposerComponents.tsx
 +++ b/src/renderer/src/components/session/ComposerComponents.tsx
-@@ -1,12 +1,11 @@
- import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
--import { AlertCircle, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Sparkles, Star, Target, Wrench, X } from "lucide-react";
-+import { Brain, Check, ChevronDown, ChevronLeft, CornerDownLeft, Eye, FileText, GitBranch, ImageIcon, ListChecks, Paperclip, Plus, RefreshCw, Sparkles, Target, Wrench, X } from "lucide-react";
- import { t, type TranslationKey } from "../../i18n";
- import { Button } from "../ui-shadcn/button";
- import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "../ui-shadcn/command";
+@@ -8,7 +8,6 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from ".
  import { Dialog, DialogClose, DialogContent, DialogHeader, DialogTitle } from "../ui-shadcn/dialog";
  import { cn } from "../../lib/utils";
  import { showNotice } from "../../utils/notice";
@@ -16,7 +10,7 @@ index 7839db88..8f5f1992 100644
  import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "../ui-shadcn/dropdown-menu";
  import { ConfirmDialog } from "../app/AppParts";
  import { ComposerImageGenOptions } from "./ComposerImageGenOptions";
-@@ -23,6 +22,10 @@ import { WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeModelPreference, read
+@@ -25,6 +24,10 @@ import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelco
  import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
  import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
  import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
@@ -27,7 +21,7 @@ index 7839db88..8f5f1992 100644
  import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, UsageProbeBackend } from "../../../../shared/types";
  
  /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
-@@ -262,10 +265,18 @@ export function ComposerBottomBar(props: {
+@@ -275,10 +278,18 @@ export function ComposerBottomBar(props: {
  	quickMessagesControl?: ReactNode;
  	voiceControls: ReactNode;
  	sendControls: ReactNode;
@@ -48,7 +42,7 @@ index 7839db88..8f5f1992 100644
  	onCompact: () => void;
  	onChangeMode: (mode: ComposerAgentMode) => void;
  	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
-@@ -495,10 +506,14 @@ export function ComposerBottomBar(props: {
+@@ -504,10 +515,14 @@ export function ComposerBottomBar(props: {
  							modelPendingTo={modelDisplay.pending && modelTo ? modelTo.modelName || modelTo.modelId : undefined}
  							modelPendingTitle={modelPendingTitle}
  							thinkingText={thinkingText}
@@ -63,7 +57,7 @@ index 7839db88..8f5f1992 100644
  						/>
  					)}
  					{/* DSH 压缩入口与 pi 统一：上下文圆环（右侧）常驻并带压缩按钮。
-@@ -514,6 +529,7 @@ export function ComposerBottomBar(props: {
+@@ -523,6 +538,7 @@ export function ComposerBottomBar(props: {
  					    圆环与压缩入口一并屏蔽。 */}
  					{isImageGenMode ? null : (
  						<SessionContextMeter
@@ -71,7 +65,7 @@ index 7839db88..8f5f1992 100644
  							state={props.state}
  							onCompact={props.onCompact}
  							backend={usageBackend}
-@@ -552,52 +568,87 @@ export function ComposerBottomBar(props: {
+@@ -561,52 +577,87 @@ export function ComposerBottomBar(props: {
   * 交互：点击弹出 root 菜单两行（模型 / 思考），drill-in 复用现有 Dialog 选择器
   * （onPickModel / onPickThinking），列表 UI 不重做。
   */
@@ -194,7 +188,7 @@ index 7839db88..8f5f1992 100644
  	);
  }
  
-@@ -667,199 +718,17 @@ function CommandPickerDialog(props: {
+@@ -676,199 +727,17 @@ function CommandPickerDialog(props: {
  	);
  }
  
@@ -405,7 +399,7 @@ index 7839db88..8f5f1992 100644
  	return (
  		<CommandPickerDialog
  			title={t("app.modelPickerTitle")}
-@@ -867,12 +736,12 @@ export function ModelPicker(props: {
+@@ -876,12 +745,12 @@ export function ModelPicker(props: {
  			className="model-picker sm:max-w-[min(720px,calc(100vw-32px))]"
  			searchPlaceholder={t("app.modelPickerSearch")}
  			emptyLabel={t("app.modelPickerEmpty")}
@@ -421,7 +415,7 @@ index 7839db88..8f5f1992 100644
  			// 手动刷新入口：标题栏右上角，任何情况下（含加载失败）都能重新拉取模型列表。
  			headerAction={
  				props.onRefresh ? (
-@@ -882,52 +751,7 @@ export function ModelPicker(props: {
+@@ -891,52 +760,7 @@ export function ModelPicker(props: {
  				) : undefined
  			}
  		>

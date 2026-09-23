@@ -22,20 +22,34 @@
 
 ### 自动（默认）
 
-`.github/workflows/fork-sync-upstream.yml` 每日 03:17 UTC 自动跑 `scripts/sync-upstream.mjs`：
-合并 `upstream/main` → 按 `docs/fork-conflict-policy.md` 解冲突 → 重新生成生成物 →
-typecheck + 全量测试门禁 → 全绿才推 `custom`。策略未覆盖的冲突或门禁失败时**不推送**，
-开 issue 并附冲突报告。
+`.github/workflows/fork-sync-upstream.yml` 每日 03:17 UTC 自动跑两个独立 job：
+
+| job | 作用 |
+|---|---|
+| `sync-main` | `main` 直接 fast-forward 到 `upstream/main`（`git push origin upstream/main:main`）。不做 merge——main 的定义就是「永远等于上游」；git 天然拒绝非 ff 推送，所以 main 一旦被污染会失败变红而不覆盖历史。 |
+| `sync` | 合并 `upstream/main` 到 `custom`：按 `docs/fork-conflict-policy.md` 解冲突 → 重新生成生成物 → typecheck + 全量测试门禁 → 全绿才推 `custom`。策略未覆盖的冲突或门禁失败时**不推送**，原因写进 job summary。 |
+
+两个 job 互不影响：`main` 的跟进不依赖 `custom` 是否能干净合并（反之亦然）。
+
+> **注意**：`schedule` 与 `workflow_dispatch` 只读**默认分支**上的 workflow 文件。
+> 本 fork 的默认分支已设为 `custom`，因此本文件在 `custom` 上即生效；
+> 但它同步的 `main` 分支同时也在被维护。
 
 ### 手动
 
 ```bash
-npm run sync:upstream                # 合并 + 校验 + 推送
+npm run sync:upstream                # 合并 custom + 校验 + 推送（不含 main）
 npm run sync:upstream -- --dry-run   # 只预览会并入什么
 npm run sync:upstream -- --no-push   # 合并 + 校验，不推送
 ```
 
 脚本在临时 worktree 里合并，不影响当前工作区；冲突解法交给 `rerere` 记住，下次自动重放。
+
+> 脚本只处理 `custom`。`main` 的跟随用一行命令，或交给 CI 的 `sync-main` job：
+>
+> ```bash
+> git fetch upstream main && git push origin upstream/main:main
+> ```
 
 ### 冲突策略
 

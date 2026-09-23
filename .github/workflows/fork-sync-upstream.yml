@@ -36,6 +36,34 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  sync-main:
+    name: Fast-forward main to upstream/main
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # 独立于 custom 同步：main 是纯上游镜像，与 custom 是否有冲突无关，
+    # 即使 custom 同步失败也应保持 main 跟进（反之亦然）。
+    steps:
+      - name: Checkout (default branch, 仅为拿到 git 与推送凭据)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/ayuayue/PiDeck.git
+          git fetch upstream main --no-tags
+
+      - name: Fast-forward main
+        run: |
+          # 直接推 upstream/main → main。为什么不做 merge：main 的定义就是
+          # 「永远等于 upstream/main」，合并会产生无意义的 merge 提交。
+          #
+          # 关键安全属性：git 天然拒绝非 fast-forward 推送（无需 --force）。
+          # 若 main 被污染（有人往 main 提交了东西），这一步会失败变红，
+          # 而不是覆盖历史——即强制执行 FORK.md 里「main 只允许 fast-forward」。
+          git push origin upstream/main:main
+
   sync:
     name: Sync upstream/main into custom
     runs-on: ubuntu-latest

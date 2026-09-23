@@ -4,13 +4,15 @@ name: Fork Sync Upstream
 #   cron 每日 + 手动触发 → 在 CI 里跑 scripts/sync-upstream.mjs
 #   → 合并 upstream/main 到 custom（冲突按 docs/fork-conflict-policy.md 自动解决）
 #   → typecheck + 全量测试门禁 → 全绿才 push custom
-#   → 策略未覆盖的冲突 / 门禁失败 → 开 issue（带冲突报告），**不推送**。
+#   → 策略未覆盖的冲突 / 门禁失败 → 写 job summary（issue 尽力而为），**不推送**。
 #
 # 为什么不做「打 tag + 自动发版」：发版需要人工确认版本号与变更说明。同步与发版解耦：
 # 本 workflow 只负责把 custom 更新到最新；发版走 fork-release.yml（手动触发）。
 #
-# 注意：fork 的 custom 分支不是默认分支，cron 事件使用默认分支上的 workflow 文件，
-# 因此本文件必须先合入 main 才生效（与上游 post-release-sidecars 同一机制）。
+# 生效前提：`schedule` / `workflow_dispatch` **只认默认分支上的 workflow 文件**
+# （与上游 post-release-sidecars 同一机制）。本 fork 已把默认分支设为 `custom`
+# （见 FORK.md「一次性 GitHub 设置」），因此本文件推上 custom 即生效。
+# 若把默认分支改回 main，本 workflow 会立刻停止定时与手动触发。
 
 on:
   schedule:

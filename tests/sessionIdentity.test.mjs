@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import path from "node:path";
 import test from "node:test";
 import ts from "typescript";
 import vm from "node:vm";
@@ -189,6 +190,66 @@ test("passes through already-absolute native and WSL paths", () => {
 	const { toAbsoluteSessionPath } = loadModule();
 	assert.equal(toAbsoluteSessionPath("C:\\Users\\dev\\.pi\\sessions\\a.jsonl", "D:\\Project", "native"), "C:\\Users\\dev\\.pi\\sessions\\a.jsonl");
 	assert.equal(toAbsoluteSessionPath("/mnt/d/Project/.pi/sessions/a.jsonl", "D:\\Project", "wsl"), "/mnt/d/Project/.pi/sessions/a.jsonl");
+});
+
+// 回归背景：分隔符风格曾按 environment 一刀切（native 一律转反斜杠），在 macOS/Linux
+// 上把 "/Users/me/proj/.pi/sessions/x.jsonl" 变成 "\Users\me\proj\.pi\sessions\x.jsonl"——
+// 既不是绝对路径（path.isAbsolute === false）也不存在，于是 catalog 里的 filePath 读不到
+// 历史（会话打开空白），并且该坏路径还会被当 --session 传给 pi，在项目根目录生成幽灵文件。
+test("keeps POSIX project paths POSIX when resolving a native relative sessionFile", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	assert.equal(toAbsoluteSessionPath(".pi/sessions/session.jsonl", "/Users/me/proj", "native"), "/Users/me/proj/.pi/sessions/session.jsonl");
+});
+
+test("returns a path node's path.isAbsolute accepts on POSIX", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	const resolved = toAbsoluteSessionPath(".pi/sessions/2026-09-22T03-40-51-246Z_abc.jsonl", "/Users/me/proj", "native");
+	assert.equal(path.isAbsolute(resolved), true);
+});
+
+test("still emits backslashes for Windows drive and UNC project paths", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	assert.equal(toAbsoluteSessionPath(".pi/sessions/session.jsonl", "C:/Project/PiDeck", "native"), "C:\\Project\\PiDeck\\.pi\\sessions\\session.jsonl");
+	assert.equal(toAbsoluteSessionPath(".pi/sessions/session.jsonl", "\\\\server\\share\\proj", "native"), "\\\\server\\share\\proj\\.pi\\sessions\\session.jsonl");
+});
+
+// 存量 catalog 里已经落盘的坏 filePath（旧实现产物）也要能自愈，否则修复只对新建会话生效。
+test("repairs a legacy backslash-mangled POSIX path back into the project directory", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	assert.equal(toAbsoluteSessionPath("\\Users\\me\\proj\\.pi\\sessions\\a.jsonl", "/Users/me/proj", "native"), "/Users/me/proj/.pi/sessions/a.jsonl");
+});
+
+test("leaves a backslash-rooted path alone when it is outside the POSIX project", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	assert.equal(toAbsoluteSessionPath("\\Users\\dev\\.pi\\sessions\\a.jsonl", "/Users/me/proj", "native"), "\\Users\\dev\\.pi\\sessions\\a.jsonl");
+});
+
+// 守住"不碰 cwd + 字面反斜杠文件名"：pi 在 POSIX 上可能真的建了这种文件。
+test("does not rewrite a project-prefixed path whose file name starts with a backslash", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	const literal = "/Users/me/proj/\\Users\\me\\proj\\.pi\\sessions\\a.jsonl";
+	assert.equal(toAbsoluteSessionPath(literal, "/Users/me/proj", "native"), literal);
+});
+
+// 2026-09 事故形态：旧实现先把相对路径变反斜杠，pi 在 POSIX 上又把它当相对路径解析，
+// 于是项目根下真的出现了一个「文件名含反斜杠」的会话文件，catalog 存的正是这个真实路径。
+// 它绝不能被当作「坏路径」改写——反斜杠还原成正斜杠后会指向**另一个真实会话**的文件
+// （文件名里的时间戳属于别人），改写即造成会话内容错位。
+test("leaves a real project-root file whose name contains backslashes untouched", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	const ghost = "/Users/me/proj/\\Users\\me\\proj\\.pi\\sessions\\2026-09-22T05-11-27-800Z_01a0c786.jsonl";
+	assert.equal(toAbsoluteSessionPath(ghost, "/Users/me/proj", "native"), ghost);
+});
+
+// 同理：<project>/\Users\… 还原后正好落在项目 sessionDir 里、且与另一条条目同文件，
+// 自愈逻辑若「顺手修复」就会把两条会话指向同一个文件。这里断言它保持原样，
+// 真实搬迁必须由 migrate-ghost-sessions.mjs 按文件头 id 显式完成。
+test("keeps a ghost entry that would collide with a real session file unchanged", () => {
+	const { toAbsoluteSessionPath } = loadModule();
+	const project = "/Users/me/proj";
+	const ghost = `${project}/\\Users\\me\\proj\\.pi\\sessions\\a.jsonl`;
+	const real = `${project}/.pi/sessions/a.jsonl`;
+	assert.notEqual(toAbsoluteSessionPath(ghost, project, "native"), real);
 });
 
 test("resolves a WSL relative sessionFile against the /mnt/<drive> project base", () => {

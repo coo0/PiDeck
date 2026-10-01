@@ -13,7 +13,19 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+
   build-release:
+    needs: prepare-release
     name: Build ${{ matrix.name }} packages
     strategy:
       fail-fast: false

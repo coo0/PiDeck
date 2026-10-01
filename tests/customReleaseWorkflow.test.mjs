@@ -6,7 +6,14 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const workflow = readFileSync(join(repoRoot, ".github/workflows/custom-release.yml"), "utf8");
-const matrix = workflow.match(/^[\t ]*matrix:\s*\n[\s\S]{0,2400}?^[\t ]*runs-on:/m)?.[0] ?? "";
+
+function job(name) {
+	return workflow.match(new RegExp(`^[\\t ]{2}${name}:\\s*\\n([\\s\\S]*?)(?=^[\\t ]{2}[a-z][\\w-]*:\\s*$|(?![\\s\\S]))`, "m"))?.[1] ?? "";
+}
+
+const prepareRelease = job("prepare-release");
+const buildRelease = job("build-release");
+const matrix = buildRelease.match(/^[\t ]*matrix:\s*\n[\s\S]{0,2400}?^[\t ]*runs-on:/m)?.[0] ?? "";
 const matrixInclude = matrix.match(/^[\t ]*include:\s*\n([\s\S]*?)(?=^[\t ]*runs-on:)/m)?.[1] ?? "";
 const matrixEntries = [...matrixInclude.matchAll(/^([\t ]*)-[\t ]+[\s\S]*?(?=^\1-[\t ]+|(?![\s\S]))/gm)].map((match) => match[0]);
 const permissions = workflow.match(/^permissions:\s*\n([\s\S]*?)(?=^[^\t \r\n][^:\r\n]*:\s*$)/m)?.[1] ?? "";
@@ -31,10 +38,25 @@ test("custom release workflow: 仅由 custom-v 标签推送触发", () => {
 	assert.match(workflow, /^on:\s*\n[\t ]+push:\s*\n[\t ]+tags:\s*\n[\t ]+-\s*"custom-v\*"\s*\n\s*permissions:/m);
 });
 
-test("custom release workflow: 矩阵仅构建三个目标平台", () => {
+test("custom release workflow: 准备 job 在 Ubuntu 上使用 GITHUB_TOKEN 创建指定标签的普通 Release", () => {
+	assert.match(prepareRelease, /^\s*runs-on:\s*ubuntu-latest\s*\n[\s\S]{0,240}?uses:\s*softprops\/action-gh-release@v2[\s\S]{0,160}?token:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}[\s\S]{0,160}?tag_name:\s*\$\{\{\s*github\.ref_name\s*\}\}[\s\S]{0,160}?draft:\s*false[\s\S]{0,160}?prerelease:\s*false/m);
+});
+
+test("custom release workflow: 准备 job 不上传文件或构建产物", () => {
+	assert.doesNotMatch(prepareRelease, /(?:^[\t ]+files:|npm\s+run\s+build|matrix\.command)/m);
+});
+
+test("custom release workflow: 矩阵构建依赖 Release 准备 job", () => {
+	assert.match(buildRelease, /^\s*needs:\s*prepare-release\s*$/m);
+});
+
+test("custom release workflow: 矩阵仍并行构建三个目标平台", () => {
 	assert.deepEqual(
-		matrixEntries.map((entry) => entry.match(/^[\t ]*-[\t ]+name:\s*([^\r\n]+?)\s*$/m)?.[1] ?? ""),
-		["Windows x64", "macOS x64", "macOS arm64"],
+		{
+			targets: matrixEntries.map((entry) => entry.match(/^[\t ]*-[\t ]+name:\s*([^\r\n]+?)\s*$/m)?.[1] ?? ""),
+			usesMaxParallel: /^[\t ]+max-parallel:/m.test(buildRelease),
+		},
+		{ targets: ["Windows x64", "macOS x64", "macOS arm64"], usesMaxParallel: false },
 	);
 });
 
@@ -62,8 +84,11 @@ test("custom release workflow: 同一标签的发布串行且不取消运行中�
 	assert.match(workflow, /^concurrency:\s*\n[\t ]+group:\s*custom-release-\$\{\{\s*github\.ref\s*\}\}\s*\n[\t ]+cancel-in-progress:\s*false\s*\n/m);
 });
 
-test("custom release workflow: GITHUB_TOKEN 按推送标签创建普通 Release 并忽略未匹配资产", () => {
-	assert.match(workflow, /uses:\s*softprops\/action-gh-release@v2[\s\S]{0,160}?token:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}[\s\S]{0,160}?tag_name:\s*\$\{\{\s*github\.ref_name\s*\}\}[\s\S]{0,160}?fail_on_unmatched_files:\s*false[\s\S]{0,160}?draft:\s*false[\s\S]{0,160}?prerelease:\s*false/);
+test("custom release workflow: 矩阵上传 action 使用 GITHUB_TOKEN、普通 Release 与矩阵上传清单", () => {
+	assert.match(
+		buildRelease,
+		/name:\s*Upload release assets[\s\S]{0,160}?uses:\s*softprops\/action-gh-release@v2[\s\S]{0,160}?token:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}[\s\S]{0,160}?tag_name:\s*\$\{\{\s*github\.ref_name\s*\}\}[\s\S]{0,160}?fail_on_unmatched_files:\s*false[\s\S]{0,160}?draft:\s*false[\s\S]{0,160}?prerelease:\s*false[\s\S]{0,160}?files:\s*\$\{\{\s*matrix\.upload_files\s*\}\}/,
+	);
 });
 
 test("custom release workflow: 不使用 RELEASE_PAT", () => {
@@ -82,10 +107,6 @@ test("custom release workflow: 两个 macOS 架构仅上传 dmg 和 zip", () => 
 			["release/*.dmg", "release/*.zip"],
 		],
 	);
-});
-
-test("custom release workflow: 发布 action 使用矩阵上传清单", () => {
-	assert.match(workflow, /files:\s*\$\{\{\s*matrix\.upload_files\s*\}\}/);
 });
 
 test("custom release workflow: 不包含 Linux 或独立 runtime 资产 job", () => {

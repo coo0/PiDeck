@@ -1,9 +1,9 @@
-name: Custom Release
+name: Normal Release
 
 on:
   push:
     tags:
-      - "custom-v*"
+      - "v*"
 
 permissions:
   contents: write

@@ -1,7 +1,7 @@
 name: Release
 
-# 发版链路（tag push 即全自动）：
-#   push tag v* → 本 workflow 5 个安装包构建 job + pack-dsh-runtime job（单 ubuntu
+# 发版链路（手动触发）：
+#   workflow_dispatch → 本 workflow 5 个安装包构建 job + pack-dsh-runtime job（单 ubuntu
 #   runner 交叉打包 6 平台 runtime tgz，含 win32-arm64 / darwin-x64 这两个历史缺口）
 #   → softprops 用 RELEASE_PAT 发布（GITHUB_TOKEN 发布不广播 release: published，防递归）
 #   → post-release-sidecars.yml 被触发：只负责触发 sync-atomgit.yml（runtime 补发
@@ -12,9 +12,6 @@ name: Release
 # 触发用于补同步。
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:

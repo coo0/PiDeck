@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const workflow = readFileSync(join(repoRoot, ".github/workflows/custom-release.yml"), "utf8");
+const releaseWorkflow = readFileSync(join(repoRoot, ".github/workflows/release.yml"), "utf8");
 
 function job(name) {
 	return workflow.match(new RegExp(`^[\\t ]{2}${name}:\\s*\\n([\\s\\S]*?)(?=^[\\t ]{2}[a-z][\\w-]*:\\s*$|(?![\\s\\S]))`, "m"))?.[1] ?? "";
@@ -34,8 +35,18 @@ function uploadFiles(name) {
 		.filter(Boolean);
 }
 
-test("custom release workflow: 仅由 custom-v 标签推送触发", () => {
-	assert.match(workflow, /^on:\s*\n[\t ]+push:\s*\n[\t ]+tags:\s*\n[\t ]+-\s*"custom-v\*"\s*\n\s*permissions:/m);
+test("normal release workflow: 仅由 v 标签推送触发", () => {
+	assert.match(workflow, /^on:\s*\n[\t ]+push:\s*\n[\t ]+tags:\s*\n[\t ]+-\s*"v\*"\s*\n\s*permissions:/m);
+});
+
+test("legacy release workflow: 不再自动响应 Tag 推送但保留手动触发", () => {
+	assert.deepEqual(
+		{
+			hasPushTrigger: /^[\t ]{2}push:\s*$/m.test(releaseWorkflow),
+			hasWorkflowDispatch: /^on:\s*\n[\t ]{2}workflow_dispatch:\s*$/m.test(releaseWorkflow),
+		},
+		{ hasPushTrigger: false, hasWorkflowDispatch: true },
+	);
 });
 
 test("custom release workflow: 准备 job 在 Ubuntu 上使用 GITHUB_TOKEN 创建指定标签的普通 Release", () => {

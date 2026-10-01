@@ -35,6 +35,7 @@ import type {
 	RewindCheckpointPageParams,
 	ResolveLaunchDefaultsInput,
 	ResolvedLaunchDefaults,
+	AvailableModel,
 	ArchivedDshSession,
 } from "../../shared/types";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
@@ -299,6 +300,8 @@ export type SessionIpcDeps = {
 	sessionRuntimeCoordinator: SessionRuntimeCoordinator;
 	agentManager: AgentManager;
 	configManager: ConfigManager;
+	/** Pi capability snapshot；仅通过既有 PiModelCapabilityCache/stdio RPC 获取。 */
+	getPiModelCapabilities?: () => AvailableModel[] | undefined;
 	codexSessionImporter: CodexSessionImporter;
 	claudeSessionImporter: ClaudeSessionImporter;
 	openCodeSessionImporter: OpenCodeSessionImporter;
@@ -370,6 +373,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		sessionRuntimeCoordinator,
 		agentManager,
 		configManager,
+		getPiModelCapabilities,
 		codexSessionImporter,
 		claudeSessionImporter,
 		openCodeSessionImporter,
@@ -585,31 +589,38 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if ((input.backend !== "dsh" && !model) || !thinkingLevel) {
 			try {
 				const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
+				const capabilityModels = input.backend === "dsh" ? undefined : getPiModelCapabilities?.();
 				// 引导页/渲染层显式传入的模型（如欢迎页偏好）也可能指向已删除的供应商/模型：
-				// 校验其仍存在于 models.json，不存在则交给解析器按欢迎页点选 → 配置默认 →
-				// enabledModels → lastUsed 的顺序兜底，避免新会话带着幽灵模型启动。
+				// 按已发布 capability（未就绪才用 models.json）校验，不存在则按手选 → 系统默认 →
+				// capability 首模型 → models.json 首模型的顺序兜底，避免新会话带着幽灵模型启动。
 				if (input.backend !== "dsh" && model) {
 					if (
 						typeof model.provider !== "string" ||
 						typeof model.modelId !== "string" ||
-						!isModelInModelsConfig(modelsResult.parsed, {
-							provider: model.provider,
-							modelId: model.modelId,
-						})
+						!isModelInModelsConfig(
+							modelsResult.parsed,
+							{
+								provider: model.provider,
+								modelId: model.modelId,
+							},
+							capabilityModels,
+						)
 					) {
 						model = undefined;
 					}
 				}
 				// 缺省填充与引导页展示共用同一解析器（launchDefaults），
 				// 保证「预选的默认」与「创建时真正套用的默认」永远同源。
-				// 欢迎页偏好（renderer localStorage）同样经主进程校验存在性后按
-				// 「欢迎页点选 > 显式默认 > enabledModels > 上次使用 > 空」参与解析；
+				// 欢迎页偏好（renderer localStorage）经主进程校验存在性后参与解析；无手选时
+				// 顺序为「系统显式默认 > capability 首模型 > models.json 首模型」。
 				// explicit model（用户主动指名）仍优先于一切（input.model，见上方校验）。
 				const defaults = resolveLaunchDefaultOptions({
 					backend: input.backend,
+					model,
 					settings: settingsResult.parsed,
 					models: modelsResult.parsed,
-					// lastUsed 语义：用户最近一次实际发送所用模型；仅无显式默认与偏好时参与。
+					capabilities: capabilityModels,
+					// 保留 lastUsed 读取仅供兼容诊断；它不参与无会话默认回退。
 					lastUsedModel: settingsStore.get().lastUsedModel,
 					welcomeModel: input.welcomeModel && typeof input.welcomeModel.provider === "string" && typeof input.welcomeModel.modelId === "string" ? input.welcomeModel : undefined,
 				});
@@ -646,11 +657,13 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		const backend = input?.backend === "dsh" ? "dsh" : undefined;
 		try {
 			const [settingsResult, modelsResult] = await Promise.all([configManager.getSettingsConfig(), configManager.getModelsConfig()]);
+			const capabilityModels = backend === "dsh" ? undefined : getPiModelCapabilities?.();
 			return resolveLaunchDefaultOptions({
 				backend,
 				settings: settingsResult.parsed,
 				models: modelsResult.parsed,
-				// lastUsed 语义：引导页预选默认 = 用户最后一次实际使用的模型。
+				capabilities: capabilityModels,
+				// 保留 lastUsed 读取仅供兼容诊断；它不参与无会话默认回退。
 				lastUsedModel: settingsStore.get().lastUsedModel,
 			});
 		} catch {

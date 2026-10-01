@@ -2578,6 +2578,7 @@ function registerIpc() {
 		sessionRuntimeCoordinator,
 		agentManager,
 		configManager,
+		getPiModelCapabilities: () => piModelCapabilityCache?.getSnapshot()?.models,
 		codexSessionImporter,
 		claudeSessionImporter,
 		openCodeSessionImporter,

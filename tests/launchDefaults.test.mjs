@@ -1,3 +1,4 @@
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
@@ -145,19 +146,20 @@ test("无显式默认：引导页点选优先于 lastUsed（用户规则第 1 �
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
-test("无显式默认与偏好：lastUsed 兜底（用户规则第 4 条）", () => {
+test("无显式默认与偏好：不使用 lastUsed，回退 capability/models 首模型", () => {
 	const result = resolve({
 		settings: {},
 		models: MANY,
 		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
 	});
-	assert.deepEqual(plain(result.model), { provider: "zhipu", modelId: "glm-5" });
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
-test("无显式默认、无偏好、无 lastUsed：默认是空的（用户规则第 5 条，不再回退第一个模型）", () => {
+test("无显式默认、无偏好、无 lastUsed：回退 models.json 第一个模型与首个思考档位", () => {
 	const result = resolve({ settings: {}, models: MANY });
-	assert.equal(result.model, undefined);
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
+	assert.equal(result.thinkingLevel, "off");
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
@@ -171,27 +173,27 @@ test("显式默认指向已删除供应商/模型 → 视为未配置，回退�
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
-test("偏好指向已删除模型 → 跳过偏好，回退 lastUsed", () => {
+test("偏好指向已删除模型 → 跳过偏好，回退首模型而非 lastUsed", () => {
 	const result = resolve({
 		settings: {},
 		models: MANY,
 		lastUsedModel: { provider: "zhipu", modelId: "glm-5" },
 		welcomeModel: { provider: "deleted-provider", modelId: "old" },
 	});
-	assert.deepEqual(plain(result.model), { provider: "zhipu", modelId: "glm-5" });
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 });
 
-test("lastUsed 非法形状（非对象/半结构）被忽略，返回空（无可回退来源）", () => {
+test("lastUsed 非法形状（非对象/半结构）被忽略，回退第一个可用模型", () => {
 	for (const bad of [null, "zhipu/glm-5", { provider: "zhipu" }, { modelId: "glm-5" }, { provider: 42, modelId: "x" }]) {
 		const result = resolve({ settings: {}, models: OPENAI, lastUsedModel: bad });
-		assert.equal(result.model, undefined);
+		assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	}
 });
 
-test("welcome 偏好非法形状被忽略，返回空", () => {
+test("welcome 偏好非法形状被忽略，回退第一个可用模型", () => {
 	for (const bad of [null, "openai/gpt-5.2", { provider: "openai" }, { modelId: "gpt-5.2" }, { provider: 42, modelId: "x" }]) {
 		const result = resolve({ settings: {}, models: OPENAI, welcomeModel: bad });
-		assert.equal(result.model, undefined);
+		assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	}
 });
 
@@ -208,15 +210,38 @@ test("dsh 后端忽略模型来源（模型归属 host settings），思考档�
 	assert.equal(result.thinkingLevel, "high");
 });
 
+test("能力模型是唯一模型来源时，优先于空 models.json 与 enabledModels/lastUsed", () => {
+	const result = resolve({
+		settings: { enabledModels: ["stale/*"] },
+		models: { providers: {} },
+		lastUsedModel: { provider: "stale", modelId: "old" },
+		capabilities: [{ provider: "pi", id: "first", name: "First", thinkingLevels: ["high"] }],
+	});
+	assert.deepEqual(plain(result.model), { provider: "pi", modelId: "first" });
+	assert.equal(result.thinkingLevel, "high");
+});
+
+test("能力快照提供非 off 首档时，缺省思考强度取当前模型能力首项", () => {
+	const result = resolve({
+		settings: { defaultProvider: "openai", defaultModel: "gpt-5.2" },
+		models: OPENAI,
+		capabilities: [{ provider: "openai", id: "gpt-5.2", thinkingLevels: ["high", "max"] }],
+	});
+	assert.equal(result.thinkingLevel, "high");
+});
+
 test("思考级别一律取 settings.defaultThinkingLevel（偏好/模型来源不影响）", () => {
 	const result = resolve({
 		settings: { defaultThinkingLevel: "max", defaultProvider: "openai", defaultModel: "gpt-5.2" },
 		models: OPENAI,
 	});
 	assert.equal(result.thinkingLevel, "max");
-	// 无 defaultThinkingLevel 时为空（不回落）
+	// 空白 defaultThinkingLevel 视为未设置，能力首项仍生效
+	const blank = resolve({ settings: { defaultThinkingLevel: "  " }, models: OPENAI, capabilities: [{ provider: "openai", id: "gpt-5.2", thinkingLevels: ["high"] }] });
+	assert.equal(blank.thinkingLevel, "high");
+	// 无 defaultThinkingLevel 且能力未就绪时回落兼容首档
 	const none = resolve({ settings: {}, models: OPENAI });
-	assert.equal(none.thinkingLevel, undefined);
+	assert.equal(none.thinkingLevel, "off");
 });
 
 test("half-configured settings（只有 defaultProvider）不进回退歧义", () => {
@@ -224,8 +249,8 @@ test("half-configured settings（只有 defaultProvider）不进回退歧义", (
 		settings: { defaultProvider: "anthropic" },
 		models: MANY,
 	});
-	// 无法配对 → 无显式默认、无偏好、无 lastUsed → 空
-	assert.equal(result.model, undefined);
+	// 无法配对 → 无显式默认、无偏好、无 lastUsed → 第一个可用模型
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
@@ -236,13 +261,13 @@ test("dirty inputs degrade to empty defaults instead of throwing", () => {
 		{ settings: { defaultThinkingLevel: 3 }, models: { providers: {} } },
 	];
 	for (const input of cases) {
-		assert.deepEqual(plain(resolve({ ...input })), {});
+		assert.deepEqual(plain(resolve({ ...input })), { thinkingLevel: "off" });
 	}
 });
 
 // ---- enabledModels（pi 模型切换列表，用户规则：优先级在显式默认之后）----
 
-test("无显式默认：enabledModels 第一个可用模型成为默认（用户规则）", () => {
+test("无显式默认：capability 首模型优先于 enabledModels", () => {
 	const result = resolve({
 		settings: { enabledModels: ["ai88/deepseek-v4-flash-vision-exp"] },
 		models: {
@@ -251,8 +276,9 @@ test("无显式默认：enabledModels 第一个可用模型成为默认（用户
 				openai: { models: [{ id: "gpt-5.2" }] },
 			},
 		},
+		capabilities: [{ provider: "openai", id: "gpt-5.2", thinkingLevels: ["high"] }],
 	});
-	assert.deepEqual(plain(result.model), { provider: "ai88", modelId: "deepseek-v4-flash-vision-exp" });
+	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	assert.equal(result.defaultModelConfigured, undefined);
 });
 
@@ -274,7 +300,7 @@ test("显式默认存在时 enabledModels 不参与（优先级在默认之后�
 	assert.equal(result.defaultModelConfigured, true);
 });
 
-test("enabledModels glob 匹配（provider/modelId 段分别 glob）", () => {
+test("无显式默认时不使用 enabledModels/lastUsed，回退 models.json 首模型", () => {
 	const result = resolve({
 		settings: { enabledModels: ["ai88/*", "openai/*"] },
 		models: {
@@ -287,7 +313,7 @@ test("enabledModels glob 匹配（provider/modelId 段分别 glob）", () => {
 	assert.deepEqual(plain(result.model), { provider: "ai88", modelId: "deepseek-v4-flash-vision-exp" });
 });
 
-test("bare modelId pattern 匹配任意 provider", () => {
+test("bare modelId pattern 不改变默认首模型顺序", () => {
 	const result = resolve({
 		settings: { enabledModels: ["gpt-*"] },
 		models: {
@@ -300,7 +326,7 @@ test("bare modelId pattern 匹配任意 provider", () => {
 	assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 });
 
-test("引导页点选优先于 enabledModels；无点选时 enabledModels 优先于 lastUsed（第 3 条）", () => {
+test("引导页点选优先；无点选时不使用 enabledModels/lastUsed", () => {
 	const settings = { enabledModels: ["ai88/deepseek-v4-flash-vision-exp"] };
 	const models = {
 		providers: {
@@ -317,7 +343,7 @@ test("引导页点选优先于 enabledModels；无点选时 enabledModels 优先
 		welcomeModel: { provider: "openai", modelId: "gpt-5.2" },
 	});
 	assert.deepEqual(plain(picked.model), { provider: "openai", modelId: "gpt-5.2" });
-	// 无点选时 enabledModels 仍优先于 lastUsed（长期配置次序不变）。
+	// 无点选时回退 models.json 首模型，而不是 enabledModels 或 lastUsed。
 	const noPick = resolve({ settings, models, lastUsedModel });
 	assert.deepEqual(plain(noPick.model), { provider: "ai88", modelId: "deepseek-v4-flash-vision-exp" });
 });
@@ -339,6 +365,55 @@ test("enabledModels 脏形状（非数组/非字符串项）被忽略", () => {
 	const models = { providers: { openai: { models: [{ id: "gpt-5.2" }] } } };
 	for (const bad of [null, "ai88/x", [42], [{}, null], []]) {
 		const result = resolve({ settings: { enabledModels: bad }, models });
-		assert.equal(result.model, undefined);
+		assert.deepEqual(plain(result.model), { provider: "openai", modelId: "gpt-5.2" });
 	}
+});
+
+const capabilityDirectory = [
+	{ provider: "pi", id: "A", thinkingLevels: ["low"] },
+	{ provider: "pi", id: "B", thinkingLevels: ["high"] },
+];
+for (const models of [{ providers: {} }, OPENAI]) {
+	test(`已发布能力目录认可系统默认 B（配置目录 ${JSON.stringify(models)}）`, () => {
+		const result = resolve({ models, capabilities: capabilityDirectory, settings: { defaultProvider: "pi", defaultModel: "B" } });
+		assert.deepEqual([result.model.modelId, result.thinkingLevel], ["B", "high"]);
+	});
+	test(`已发布能力目录认可手选 B（配置目录 ${JSON.stringify(models)}）`, () => {
+		const result = resolve({ models, capabilities: capabilityDirectory, settings: { defaultProvider: "pi", defaultModel: "A" }, welcomeModel: { provider: "pi", modelId: "B" } });
+		assert.deepEqual([result.model.modelId, result.thinkingLevel], ["B", "high"]);
+	});
+}
+test("已发布空能力目录不能回退残留模型", () => {
+	const result = resolve({ models: OPENAI, capabilities: [], settings: { defaultProvider: "openai", defaultModel: "gpt-5.2" }, welcomeModel: { provider: "openai", modelId: "gpt-5.2" } });
+	assert.equal(result.model, undefined);
+});
+test("创建显式模型 B 的思考强度不取系统模型 A 的首项", () => {
+	const result = resolve({ models: {}, capabilities: capabilityDirectory, settings: { defaultProvider: "pi", defaultModel: "A" }, model: { provider: "pi", modelId: "B" } });
+	assert.deepEqual([result.model.modelId, result.thinkingLevel], ["B", "high"]);
+});
+
+test("createDraft 将显式模型 B 和 B 的思考首项交给 catalog", async () => {
+	const handlers = new Map();
+	const { registerSessionIpc } = loadTsCommonJs("src/main/ipc/sessionIpc.ts", { stubs: { electron: { ipcMain: { handle: (channel, handler) => handlers.set(channel, handler) } } } });
+	const { ipcChannels } = loadTsCommonJs("src/shared/ipc.ts");
+	let created;
+	registerSessionIpc({
+		projectStore: { get: () => ({ id: "project" }) },
+		settingsStore: { get: () => ({}) },
+		configManager: {
+			getSettingsConfig: async () => ({ parsed: { defaultProvider: "pi", defaultModel: "A" } }),
+			getModelsConfig: async () => ({ parsed: {} }),
+		},
+		getPiModelCapabilities: () => capabilityDirectory,
+		sessionCatalog: {
+			createDraft: async (input) => {
+				created = input;
+				return { ...input, id: "new" };
+			},
+		},
+		appLogger: { info: async () => {} },
+		mainCopy: (key) => key,
+	});
+	await handlers.get(ipcChannels.sessionsCatalogCreateDraft)(undefined, { projectId: "project", model: { provider: "pi", modelId: "B" } });
+	assert.deepEqual([created.model.modelId, created.thinkingLevel], ["B", "high"]);
 });

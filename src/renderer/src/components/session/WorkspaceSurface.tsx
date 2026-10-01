@@ -240,7 +240,7 @@ function FilesPanel(props: {
 	};
 	return (
 		<div
-			className="files-panel flex min-h-0 flex-1 flex-col overflow-x-hidden"
+			className="files-panel flex min-h-0 flex-1 flex-col overflow-hidden"
 			ref={panelRef}
 			tabIndex={-1}
 			onMouseDown={handlePanelMouseDown}
@@ -311,25 +311,27 @@ function FilesPanel(props: {
 					)}
 				</div>
 			</div>
-			{searchOpen ? (
-				<FileSearchResults query={fileSearch.query} onQueryChange={fileSearch.setQuery} results={fileSearch.results} isSearching={fileSearch.isSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} onClear={closeSearch} />
-			) : (
-				displayFiles.map((node) => (
-					<FileNode
-						key={node.path}
-						node={node}
-						expandedDirs={props.expandedDirs}
-						onToggleDirectory={props.onToggleDirectory}
-						onFileContextMenu={props.onFileContextMenu}
-						onOpenFile={props.onOpenFile}
-						onViewFile={props.onViewFile}
-						onDropFiles={props.onDropFiles}
-						onMoveFiles={props.onMoveFiles}
-						dragOverDir={dragOverDir}
-						onDragOverDirChange={setDragOverDir}
-					/>
-				))
-			)}
+			<div className={cn("min-h-0 flex-1", searchOpen ? "overflow-hidden" : "overflow-y-auto overscroll-contain")}>
+				{searchOpen ? (
+					<FileSearchResults query={fileSearch.query} onQueryChange={fileSearch.setQuery} results={fileSearch.results} isSearching={fileSearch.isSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} onClear={closeSearch} />
+				) : (
+					displayFiles.map((node) => (
+						<FileNode
+							key={node.path}
+							node={node}
+							expandedDirs={props.expandedDirs}
+							onToggleDirectory={props.onToggleDirectory}
+							onFileContextMenu={props.onFileContextMenu}
+							onOpenFile={props.onOpenFile}
+							onViewFile={props.onViewFile}
+							onDropFiles={props.onDropFiles}
+							onMoveFiles={props.onMoveFiles}
+							dragOverDir={dragOverDir}
+							onDragOverDirChange={setDragOverDir}
+						/>
+					))
+				)}
+			</div>
 		</div>
 	);
 }

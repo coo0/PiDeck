@@ -251,7 +251,7 @@ export function ProjectTree(props: {
             + 「⋯ 更多操作」（完整项目菜单，新建/定位/会话管理/目录设置）。
             新建与折叠都是最常用入口，直接外露；其余操作收进完整菜单。 */}
 				<div
-					className="flex items-center justify-between px-1 pb-1"
+					className="sticky top-0 z-10 flex items-center justify-between bg-sidebar px-1 pb-1"
 					// 右键与「⋯」同款完整项目菜单：让 Chat 项目行获得与工作区项目一致的操作入口
 					onContextMenu={(event) => {
 						event.preventDefault();
@@ -324,7 +324,7 @@ export function ProjectTree(props: {
 				<section aria-label={t("app.sidebarProjects")} role="tree">
 					{/* 分组标题栏：左侧「项目」标题，右侧 = 「+ 添加项目」+ 全部折叠/展开（高频操作外露）
             + 「⋯ 更多操作」。目录存在性重扫属于低频维护动作，收进菜单避免挤占窄侧栏。 */}
-					<div className="flex items-center justify-between px-1 pb-1">
+					<div className="sticky top-0 z-10 flex items-center justify-between bg-sidebar px-1 pb-1">
 						<span className="text-caption font-medium text-muted-foreground">{t("app.sidebarProjects")}</span>
 						<div className="flex items-center gap-0.5">
 							{/* 添加项目是最常用入口，外露为显式「+」按钮 */}

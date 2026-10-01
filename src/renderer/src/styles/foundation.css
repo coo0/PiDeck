@@ -1880,7 +1880,6 @@ select:focus-visible {
      避免内容贴住侧栏边缘，也为展开后的层级关系保留呼吸感。 */
   overflow-x: hidden;
   overflow-y: auto;
-  scrollbar-width: none;
   padding: 12px 12px 56px;
 }
 /* pure official：行布局/hover/active 由 ProjectTree/SessionTree Tailwind 承担。

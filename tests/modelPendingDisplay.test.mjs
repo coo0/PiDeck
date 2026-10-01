@@ -119,7 +119,8 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
 	assert.match(picker, /if \(!snapshotHasModel\) \{\s*offerModelRestart\(handle, model\);\s*return;/);
 
 	// 后端拒绝即时切换后，才由 pending hook 在可用时重试。
-	assert.match(hook, /setRuntimeModel/);
+	assert.match(hook, /await\s+current\.applyModel\(handle,/);
+	assert.match(picker, /applyModel:\s*\(handle,\s*model,\s*isCurrent\)\s*=>\s*enqueuePreference\(\s*\(\)\s*=>\s*applyRuntimeModel\(/);
 	assert.match(hook, /needsRestart/);
 
 	assert.match(ipc, /sessionsRuntimeListModels: "sessions:runtime-list-models"/);

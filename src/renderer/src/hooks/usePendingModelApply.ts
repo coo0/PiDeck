@@ -1,9 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { AvailableModel, SessionRuntimeTarget } from "../../../shared/types";
-import { desktopApi } from "../desktopApi";
 import { showNotice } from "../utils/notice";
 import type { ModelPending } from "../utils/modelPendingDisplay";
-import { SessionCommandFailure, requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { SessionCommandFailure, toSessionRuntimeTarget } from "../utils/sessionCommands";
 
 type RuntimeLike =
 	| {
@@ -22,7 +21,7 @@ export function usePendingModelApply(input: {
 	sessionId: string;
 	runtime: RuntimeLike;
 	modelPending: ModelPending | undefined;
-	applySelectedModel: (model: { provider: string; modelId: string; modelName?: string }) => void;
+	applyModel: (handle: SessionRuntimeTarget, model: AvailableModel, isCurrent: () => boolean) => Promise<boolean>;
 	clearPending: () => void;
 	offerRestart: (handle: SessionRuntimeTarget, model: AvailableModel) => void;
 }) {
@@ -54,14 +53,8 @@ export function usePendingModelApply(input: {
 		let cancelled = false;
 		void (async () => {
 			try {
-				// 重试同样只确认命令成功，展示值由待应用选择本身提供，不读取 runtime state。
-				requireSessionCommand(await desktopApi.sessions.setRuntimeModel(handle, pending.to.provider, pending.to.modelId, pending.to.modelName));
-				if (cancelled) return;
-				current.applySelectedModel({
-					provider: pending.to.provider,
-					modelId: pending.to.modelId,
-					modelName: pending.to.modelName ?? pending.to.modelId,
-				});
+				const applied = await current.applyModel(handle, { provider: pending.to.provider, id: pending.to.modelId, name: pending.to.modelName ?? pending.to.modelId }, () => !cancelled && callbacksRef.current.modelPending === pending);
+				if (!applied || cancelled || callbacksRef.current.modelPending !== pending) return;
 				current.clearPending();
 			} catch (error) {
 				if (cancelled) return;

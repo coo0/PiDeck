@@ -12,6 +12,7 @@ import {
 	sessionRuntimeBySessionIdAtomFamily,
 	upsertSessionAtom,
 } from "../atoms";
+import { welcomeModelPreferenceAtom, welcomeThinkingLevelAtom } from "../atoms/welcome-preference-atoms";
 import { desktopApi } from "../desktopApi";
 import { useBackendModelCatalog } from "./useBackendModelCatalog";
 import { resolveThinkingPickerLevels } from "../components/session/sessionPickerOptions";
@@ -20,7 +21,7 @@ import { isLiveRuntimeStatus } from "../utils/sessionCommands";
 import { resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../utils/thinkingDisplay";
 import { modelKey } from "../utils/preferenceCycle";
-import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
+import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
 
 /**
  * 会话「模型 + 思考强度」的读侧状态：模型目录、收藏、当前模型与可用档位。
@@ -42,6 +43,7 @@ export function useSessionPreferenceState(options: {
 	defaultThinkingLevel?: string;
 }) {
 	const { sessionId } = options;
+	const welcomeThinkingLevel = useAtomValue(welcomeThinkingLevelAtom);
 	const record = useAtomValue(sessionRecordByIdAtomFamily(sessionId));
 	const runtime = useAtomValue(sessionRuntimeBySessionIdAtomFamily(sessionId));
 	const upsertSession = useSetAtom(upsertSessionAtom);
@@ -103,7 +105,9 @@ export function useSessionPreferenceState(options: {
 	});
 	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
 	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 models.json 模型去高亮 DSH 目录。
-	const welcomeModel = isDshSession ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model;
+	const welcomeModels = useAtomValue(welcomeModelPreferenceAtom);
+	const setWelcomeModels = useSetAtom(welcomeModelPreferenceAtom);
+	const welcomeModel = welcomeModels[isDshSession ? "dsh" : "pi"];
 	const welcomeModelStorageKey = isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY;
 	// welcome 偏好可能指向已删除的供应商/模型（models.json 已更新而 localStorage 残留）：
 	// 目录加载后校验存在性，失效则忽略该偏好，避免选择器/默认高亮落在幽灵模型上。
@@ -123,12 +127,12 @@ export function useSessionPreferenceState(options: {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
 		if (clearWelcomePreference) {
 			try {
-				localStorage.removeItem(welcomeModelStorageKey);
+				setWelcomeModels((current) => ({ ...current, [isDshSession ? "dsh" : "pi"]: undefined }));
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [clearWelcomePreference, welcomeModelStorageKey]);
+	}, [clearWelcomePreference, welcomeModelStorageKey, isDshSession, setWelcomeModels]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
 	// 引导页（无 record）模型高亮：与主进程创建解析同序（点选 > 显式默认 > 切换列表 > 上次使用）。
 	// 规则收拢到 resolveGuideDisplayModel，不再在本 hook 与 ComposerComponents 各写一份。
@@ -223,9 +227,10 @@ export function useSessionPreferenceState(options: {
 	});
 	// 无 record 的引导页以用户刚点选的档位为最高优先级；只有尚未点选时，
 	// 才依次回退 settings.defaultThinkingLevel 与模型自身 defaultEffort。
-	const welcomeThinking = !record ? readWelcomeThinkingPreference()?.thinkingLevel : undefined;
+	const welcomeThinking = !record ? welcomeThinkingLevel : undefined;
 	const currentThinkingLevel = resolveComposerThinkingLevel({
 		record: record?.thinkingLevel,
+		pending: modelPending?.thinking,
 		// 无 record（引导页）：显式点选 > 配置默认 > 模型默认（与底栏同规则）。
 		fallback: welcomeThinking ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
 	});

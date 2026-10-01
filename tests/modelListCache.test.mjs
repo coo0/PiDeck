@@ -228,8 +228,19 @@ test("renderer picker flow shows restart confirm on needsRestart", () => {
 	assert.match(preferenceController, /restartActiveAgent/);
 	assert.doesNotMatch(preferenceController, /desktopApi\.sessions\.restartRuntime/);
 	assert.doesNotMatch(pickerHost, /desktopApi\.sessions\.restartRuntime/);
-	// 确认时先写会话记录再重启：setRuntimeModel 失败路径不再写 catalog。
-	assert.match(preferenceController, /updateRecord\(sessionId, \{[\s\S]*?model:\s*\{\s*provider:\s*intent\.provider,\s*modelId:\s*intent\.modelId,\s*modelName:\s*intent\.modelName/);
+	// 确认时先保存目标模型和回落强度，再走统一重启；写入前后均保护原运行时身份。
+	const confirmRestart = preferenceController.match(/^[\t ]*async\s+function\s+confirmRestart\s*\(\s*\)\s*\{[\s\S]*?(?=^[\t ]*function\s+cancelRestart\s*\()/m)?.[0];
+	assert.ok(confirmRestart, "confirmRestart implementation must remain discoverable");
+	assert.match(confirmRestart, /await\s+enqueuePreference\s*\(\s*async\s*\(\s*\)\s*=>/);
+	assert.match(
+		confirmRestart,
+		/if\s*\(\s*!handleIsCurrent\(\s*intent\.handle\s*\)\s*\)\s*return\s*;\s*const\s+updated\s*=\s*await\s+desktopApi\.sessions\.updateRecord\(\s*intent\.handle\.sessionId\s*,\s*\{\s*model:\s*selectedModelPreference\(\s*intent\.model\s*\)\s*,\s*thinkingLevel:\s*thinkingAfterModelChange\(\s*intent\.model\s*\)\s*,?\s*\}\s*\)\s*;/,
+	);
+	assert.match(confirmRestart, /\}\s*\)\s*;\s*if\s*\(\s*!handleIsCurrent\(\s*intent\.handle\s*\)\s*\)\s*return\s*;\s*recordRef\.current\s*=\s*updated\s*;\s*state\.upsertSession\(\s*updated\s*\)\s*;\s*state\.setModelPending\(\s*undefined\s*\)\s*;\s*await\s+restartActiveAgent\(\s*intent\.handle\.agentId\s*\)\s*;/);
+	assert.match(
+		preferenceController,
+		/^[\t ]*function\s+handleIsCurrent\(\s*handle:\s*SessionRuntimeTarget\s*\)\s*\{\s*const\s+current\s*=\s*currentHandle\(\s*\)\s*;\s*return\s+activeSessionRef\.current\s*===\s*handle\.sessionId\s*&&\s*recordRef\.current\?\.id\s*===\s*handle\.sessionId\s*&&\s*current\?\.agentId\s*===\s*handle\.agentId\s*&&\s*current\?\.runtimeGeneration\s*===\s*handle\.runtimeGeneration\s*;/m,
+	);
 	assert.match(pickerHost, /modelRestartTitle/);
 	assert.match(pickerHost, /modelRestartBody/);
 });
@@ -265,11 +276,11 @@ test("welcome page explicit model/thinking selections persist and are promoted i
 	// 并同时贯通「选择后立即显示」与「首次发送创建真实会话」两条链路。
 	// setItem 的 key 实参可能被格式化换行：容忍 ( 与 key 之间的空白。
 	// 模型偏好按后端写到各自的键（issue #253）：DSH 的 route 名不能进 pi 的偏好。
-	assert.match(picker, /localStorage\.setItem\(\s*isDshSession \? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY/);
-	assert.match(picker, /localStorage\.setItem\(WELCOME_THINKING_KEY, level\)/);
-	assert.match(components, /readWelcomeThinkingPreference\(\)\?\.thinkingLevel/);
+	assert.match(picker, /store\.set\(\s*welcomeModelPreferenceAtom\s*,/);
+	assert.match(picker, /store\.set\(\s*welcomeThinkingLevelAtom\s*,\s*level\s*\)/);
+	assert.match(components, /useAtomValue\(welcomeThinkingLevelAtom\)/);
 	assert.match(components, /fallback: welcomeThinking \?\? props\.defaultThinkingLevel/);
-	assert.match(app, /const welcomeThinking = readWelcomeThinkingPreference\(\)\?\.thinkingLevel/);
+	assert.match(app, /const welcomeThinking = store\.get\(welcomeThinkingLevelAtom\)/);
 	assert.match(app, /welcomeThinking \? \{ thinkingLevel: welcomeThinking \} : \{\}/);
 	// 通用新建会话 action 只接收调用方显式 preferences，不应暗中读取欢迎页 localStorage。
 	assert.doesNotMatch(actions, /readWelcomeModelPreference\(\)|readWelcomeThinkingPreference\(\)/);

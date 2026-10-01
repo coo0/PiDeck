@@ -1,6 +1,7 @@
+import { welcomeModelPreferenceAtom } from "../../atoms/welcome-preference-atoms";
 import { useState, useRef, useEffect, useCallback, type ReactNode } from "react";
-import { useAtomValue } from "jotai";
-import { dshModuleHiddenAtom, imageGenModuleHiddenAtom } from "../../atoms";
+import { useAtomValue, useSetAtom } from "jotai";
+import { dshModuleHiddenAtom, imageGenModuleHiddenAtom, welcomeThinkingLevelAtom } from "../../atoms";
 import { AlertCircle, Brain, Check, ChevronDown, ChevronLeft, ChevronRight, CornerDownLeft, Eye, EyeOff, FileText, GitBranch, ImageIcon, ListChecks, Loader2, Paperclip, Plus, RefreshCw, Sparkles, Star, Target, Wrench, X } from "lucide-react";
 import { t, type TranslationKey } from "../../i18n";
 import { Button } from "../ui-shadcn/button";
@@ -19,8 +20,8 @@ import { useProviderUsageBatchRefresh } from "../../hooks/useProviderUsage";
 import { DshLogo, PiLogo } from "./SessionSourceBadge";
 import { Select, SelectContent, SelectItem, SelectTrigger } from "../ui-shadcn/select";
 import { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../../utils/modelPendingDisplay";
-import { resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
-import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeDshModelPreference, readWelcomeModelPreference, readWelcomeThinkingPreference, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
+import { computeThinkingDisplay, resolveComposerThinkingLevel } from "../../utils/thinkingDisplay";
+import { isWelcomeModelLost, shouldClearWelcomePreference } from "../../utils/chatSessionBootstrap";
 import { useBackendModelCatalog } from "../../hooks/useBackendModelCatalog";
 import { CommandPickerGroup, CommandPickerPanel, type CommandPickerFilter } from "../ui-shadcn/command-picker";
 import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvider, modelPickerSearchFilter, modelRowLabel, modelRowName, orderProviderGroups, resolveModelPickerBody } from "./sessionPickerOptions";
@@ -326,9 +327,12 @@ export function ComposerBottomBar(props: {
 	});
 	// 引导页点选按后端读各自的存储（issue #253）：DSH 的模型是 host route 名，
 	// 存在 WELCOME_DSH_MODEL_KEY；读错会拿到 pi 的 model 去校验 DSH 目录（必然「失效」）。
-	const welcomeModel = needsWelcomeCatalog ? (isDsh ? readWelcomeDshModelPreference()?.model : readWelcomeModelPreference()?.model) : undefined;
+	const welcomeModels = useAtomValue(welcomeModelPreferenceAtom);
+	const setWelcomeModels = useSetAtom(welcomeModelPreferenceAtom);
+	const welcomeModel = needsWelcomeCatalog ? welcomeModels[isDsh ? "dsh" : "pi"] : undefined;
 	// 思考档位不依赖模型目录；无 record 时直接读取 picker 写入的显式选择。
-	const welcomeThinking = !props.record ? readWelcomeThinkingPreference()?.thinkingLevel : undefined;
+	const welcomeThinkingLevel = useAtomValue(welcomeThinkingLevelAtom);
+	const welcomeThinking = !props.record ? welcomeThinkingLevel : undefined;
 	const welcomeModelLost = isWelcomeModelLost(welcomeModel, welcomeCatalogModels);
 	// 删除不可逆，走保守判定：只有「一次成功的完整加载」才具备判死资格。
 	// 本组件不传 projectId → 目录恒为全局范围，与全局偏好的作用域一致。
@@ -342,12 +346,12 @@ export function ComposerBottomBar(props: {
 		// 失效偏好只清一次：下次引导页不再默认已删除的模型（创建时主进程也会兜底丢弃）。
 		if (clearWelcomePreference) {
 			try {
-				localStorage.removeItem(isDsh ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY);
+				setWelcomeModels((current) => ({ ...current, [isDsh ? "dsh" : "pi"]: undefined }));
 			} catch {
 				// localStorage 不可用时静默；展示层已忽略该偏好。
 			}
 		}
-	}, [clearWelcomePreference, isDsh]);
+	}, [clearWelcomePreference, isDsh, setWelcomeModels]);
 	const effectiveWelcomeModel = welcomeModelLost ? undefined : welcomeModel;
 	// 引导页（无 record）默认模型展示：与各后端创建时的真实套用同序（点选 > 默认）。
 	// 规则收拢到 resolveGuideDisplayModel，与 ComposerPickerHost 共用一份，避免两侧各自演化。
@@ -363,6 +367,7 @@ export function ComposerBottomBar(props: {
 	// Composer 的选择文字只取记录或引导页偏好，不能由 runtime state 改写。
 	const currentThinkingLevel = resolveComposerThinkingLevel({
 		record: props.record?.thinkingLevel,
+		pending: props.modelPending?.thinking,
 		// 引导页显式点选优先；未选择时才回退主进程解析的配置默认档位。
 		fallback: welcomeThinking ?? props.defaultThinkingLevel,
 	});
@@ -370,7 +375,8 @@ export function ComposerBottomBar(props: {
 		const labelKey = THINKING_LEVELS.find((item) => item.value === level)?.labelKey;
 		return labelKey ? t(labelKey) : level;
 	};
-	const thinkingText = currentThinkingLevel ? thinkingLevelLabel(currentThinkingLevel) : t("app.think");
+	const effortDisplay = computeThinkingDisplay(currentThinkingLevel, props.modelPending?.thinking);
+	const thinkingText = effortDisplay.levels.length ? effortDisplay.levels.map(thinkingLevelLabel).join(" → ") : t("app.think");
 	const isPlanMode = props.composerAgentMode === "plan";
 	const isImageGenMode = props.composerAgentMode === "imagegen";
 	const isGoalMode = props.composerAgentMode === "goal";

@@ -1,4 +1,5 @@
 import { resolveModelDisplayName } from "../../../shared/modelDisplayName";
+import type { PendingThinkingSelection } from "./thinkingDisplay";
 
 /**
  * 后端拒绝运行中模型切换时的 fallback 展示推导。
@@ -16,6 +17,8 @@ export type ModelPendingRef = {
 export type ModelPending = {
 	from: ModelPendingRef;
 	to: ModelPendingRef;
+	/** 尚未应用的目标强度；记录中的强度仍代表上一次成功确认值。 */
+	thinking?: PendingThinkingSelection;
 };
 
 export function formatModelRef(ref: Pick<ModelPendingRef, "provider" | "modelId" | "modelName">): string {

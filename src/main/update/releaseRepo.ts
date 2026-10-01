@@ -19,3 +19,4 @@ export const UPDATE_REPO_OWNER = "coo0";
 export const UPDATE_REPO = "PiDeck";
 
 export const RELEASES_URL = `https://github.com/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases`;
+export const LATEST_RELEASE_API_URL = `https://api.github.com/repos/${UPDATE_REPO_OWNER}/${UPDATE_REPO}/releases/latest`;

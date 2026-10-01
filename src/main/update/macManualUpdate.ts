@@ -1,9 +1,9 @@
 import { net } from "electron";
 import { compareVersions } from "../utils/versionCompare";
-import { RELEASES_URL } from "./releaseRepo";
+import { LATEST_RELEASE_API_URL } from "./releaseRepo";
 
-/** GitHub 的 `/releases/latest` 不走 REST API 配额，最终会重定向到具体 tag 页面。 */
-export const MAC_MANUAL_LATEST_RELEASE_URL = `${RELEASES_URL}/latest`;
+/** GitHub Releases API 的 latest release JSON endpoint。 */
+export const MAC_MANUAL_LATEST_RELEASE_URL = LATEST_RELEASE_API_URL;
 
 export type ManualReleaseCheckResult = {
 	latestVersion: string;
@@ -55,14 +55,15 @@ export function parseLatestReleaseTagFromJson(body: string): string | null {
 	}
 }
 
-/** 优先从 GitHub 风格的最终 URL 取版本；取不到再读 JSON 的 tag_name（AtomGit OpenAPI）。 */
+/**
+ * 优先从 Releases API JSON 的非空 `tag_name` 取版本；兼容旧 fetcher 的 GitHub tag 最终 URL。
+ */
 export function resolveLatestReleaseVersion(response: Pick<LatestReleaseResponse, "url" | "body">): string | null {
-	return parseGitHubReleaseVersion(response.url) ?? (response.body ? parseLatestReleaseTagFromJson(response.body) : null);
+	return (response.body ? parseLatestReleaseTagFromJson(response.body) : null) ?? parseGitHubReleaseVersion(response.url);
 }
 
 /**
- * 默认 fetcher 是否该读响应正文。
- * GitHub HTML 只要最终 URL；AtomGit OpenAPI 的版本号在 JSON 里。
+ * 默认 fetcher 读取 API 响应正文；GitHub Releases API 的版本号始终来自 JSON 的 `tag_name`。
  */
 export function shouldReadJsonBody(url: string, contentType: string): boolean {
 	if (/\bjson\b/i.test(contentType)) return true;
@@ -80,18 +81,16 @@ export function shouldReadJsonBody(url: string, contentType: string): boolean {
  * 不调用 electron-updater：该路径在没有 Developer ID 签名/公证时无法承诺可靠
  * 的下载、替换和重启体验。随后由 UI 打开 Release 页面交给用户手动安装。
  *
- * GitHub 源：跟随 `/releases/latest` 的 302，从最终 tag URL 取版本（不打 REST，避开配额）。
- * AtomGit 源：网页 `/releases/latest` 是 SPA 壳，地址不会变成 `/releases/tag/vX.Y.Z`，
- * 必须走 OpenAPI `.../releases/latest` 读 `tag_name`（与 CHANGELOG / 扩展热更新同一原因）。
+ * GitHub 源：请求 Releases API 的 `/repos/:owner/:repo/releases/latest`，从 JSON 的 `tag_name` 取版本。
+ * 随后由 UI 打开 Release 页面交给用户手动安装。
  */
 export function createMacManualUpdateChecker(options?: { fetchLatestRelease?: LatestReleaseFetcher }): (currentVersion: string, latestReleaseUrl?: string) => Promise<ManualReleaseCheckResult> {
 	const fetchLatestRelease =
 		options?.fetchLatestRelease ??
 		(async (url: string): Promise<LatestReleaseResponse> => {
 			const response = await net.fetch(url, { redirect: "follow" });
-			const contentType = response.headers.get("content-type") ?? "";
-			const body = shouldReadJsonBody(response.url || url, contentType) ? await response.text() : undefined;
-			return { ok: response.ok, status: response.status, url: response.url, body };
+			const body = await response.text();
+			return { ok: response.ok, status: response.status, url: response.url || url, body };
 		});
 
 	return async (currentVersion: string, latestReleaseUrl?: string): Promise<ManualReleaseCheckResult> => {

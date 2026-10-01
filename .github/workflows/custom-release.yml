@@ -1,0 +1,92 @@
+name: Custom Release
+
+on:
+  push:
+    tags:
+      - "custom-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: custom-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-release:
+    name: Build ${{ matrix.name }} packages
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            platform: windows
+            os: windows-latest
+            command: npm run build && npx electron-builder --win nsis portable zip --x64 --publish never
+            electron_mirror: https://npmmirror.com/mirrors/electron/
+            electron_builder_binaries_mirror: https://npmmirror.com/mirrors/electron-builder-binaries/
+            upload_files: |
+              release/*.exe
+              release/*.msi
+              release/*.zip
+              release/*.blockmap
+              release/latest*.yml
+              dist-runtime/dsh-runner-node/*.zip
+              dist-runtime/dsh-runner-node/dsh-runner-node-releases.json
+          - name: macOS x64
+            platform: macos
+            os: macos-latest
+            command: npm run build && npx electron-builder --mac dmg zip --x64 --publish never
+            electron_mirror: ""
+            electron_builder_binaries_mirror: ""
+            upload_files: |
+              release/*.dmg
+              release/*.zip
+          - name: macOS arm64
+            platform: macos
+            os: macos-latest
+            command: npm run build && npx electron-builder --mac dmg zip --arm64 --publish never
+            electron_mirror: ""
+            electron_builder_binaries_mirror: ""
+            upload_files: |
+              release/*.dmg
+              release/*.zip
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.13.0
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate app icon
+        run: npm run make-icon
+
+      - name: Build packages
+        run: ${{ matrix.command }}
+        env:
+          NODE_OPTIONS: "--max-old-space-size=4096"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ELECTRON_MIRROR: ${{ matrix.electron_mirror }}
+          ELECTRON_BUILDER_BINARIES_MIRROR: ${{ matrix.electron_builder_binaries_mirror }}
+
+      - name: Pack DSH runner Node sidecar
+        if: matrix.platform == 'windows'
+        run: node scripts/pack-dsh-runner-node.mjs --arch x64 && node scripts/pack-dsh-runner-node.mjs --arch arm64
+
+      - name: Upload release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ secrets.RELEASE_PAT }}
+          tag_name: ${{ github.ref_name }}
+          fail_on_unmatched_files: false
+          draft: false
+          prerelease: false
+          files: ${{ matrix.upload_files }}

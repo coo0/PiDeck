@@ -54,16 +54,20 @@ test("custom release workflow: Windows sidecar 在构建后、上传前打包两
 	assert.match(workflow, /name:\s*Build packages[\s\S]{0,800}?name:\s*Pack DSH runner Node sidecar[\s\S]{0,160}?if:\s*matrix\.platform\s*==\s*'windows'[\s\S]{0,160}?pack-dsh-runner-node\.mjs\s+--arch\s+x64\s+&&\s+node\s+scripts\/pack-dsh-runner-node\.mjs\s+--arch\s+arm64[\s\S]{0,320}?name:\s*Upload release assets/);
 });
 
-test("custom release workflow: 顶层权限仅为 contents read", () => {
-	assert.deepEqual(permissionLines, ["contents: read"]);
+test("custom release workflow: 顶层权限完整对象仅为 contents write", () => {
+	assert.deepEqual(permissionLines, ["contents: write"]);
 });
 
 test("custom release workflow: 同一标签的发布串行且不取消运行中的任务", () => {
 	assert.match(workflow, /^concurrency:\s*\n[\t ]+group:\s*custom-release-\$\{\{\s*github\.ref\s*\}\}\s*\n[\t ]+cancel-in-progress:\s*false\s*\n/m);
 });
 
-test("custom release workflow: PAT 按推送标签创建普通 Release 并忽略未匹配资产", () => {
-	assert.match(workflow, /uses:\s*softprops\/action-gh-release@v2[\s\S]{0,160}?token:\s*\$\{\{\s*secrets\.RELEASE_PAT\s*\}\}[\s\S]{0,160}?tag_name:\s*\$\{\{\s*github\.ref_name\s*\}\}[\s\S]{0,160}?fail_on_unmatched_files:\s*false[\s\S]{0,160}?draft:\s*false[\s\S]{0,160}?prerelease:\s*false/);
+test("custom release workflow: GITHUB_TOKEN 按推送标签创建普通 Release 并忽略未匹配资产", () => {
+	assert.match(workflow, /uses:\s*softprops\/action-gh-release@v2[\s\S]{0,160}?token:\s*\$\{\{\s*secrets\.GITHUB_TOKEN\s*\}\}[\s\S]{0,160}?tag_name:\s*\$\{\{\s*github\.ref_name\s*\}\}[\s\S]{0,160}?fail_on_unmatched_files:\s*false[\s\S]{0,160}?draft:\s*false[\s\S]{0,160}?prerelease:\s*false/);
+});
+
+test("custom release workflow: 不使用 RELEASE_PAT", () => {
+	assert.doesNotMatch(workflow, /secrets\.RELEASE_PAT/);
 });
 
 test("custom release workflow: Windows 上传安装包、更新元数据和 runner sidecar", () => {

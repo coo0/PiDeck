@@ -28,8 +28,9 @@ import { THINKING_LEVELS, computeModelPickerDefaultExpanded, groupModelsByProvid
 import { ModelPickerBody, currentModelKeyOf, modelPickerFilter, resolveModelPickerView, type ModelPickerSource } from "./ModelPickerBody";
 import { ModelEffortPopover } from "./ModelEffortPopover";
 import { effortColorVar } from "../../utils/effortColors";
+import { modelThinkingLevelOfMap } from "../../../../shared/modelThinkingLevels";
 import { isPopoverOpen, nextView, type EffortPopoverEvent, type EffortPopoverView } from "../../utils/modelEffortPopover";
-import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, UsageProbeBackend } from "../../../../shared/types";
+import type { AgentBackend, AgentRuntimeState, AvailableModel, ComposerAgentMode, GitBranchInfo, ModelListFailReason, ModelListReport, SessionRecord, SessionRuntimeTarget, UsageProbeBackend } from "../../../../shared/types";
 
 /** 单个 extension widget 卡片：可折叠标题栏 + 内容行，支持手动关闭 */
 // widgetKey 由扩展定义且跨重启稳定,可按 widgetKey 持久化折叠状态。
@@ -268,6 +269,7 @@ export function ComposerBottomBar(props: {
 	 */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
+	modelThinkingLevels?: unknown;
 	/** 当前会话后端（pi 缺省）。 */
 	backend?: AgentBackend;
 	/** 切换后端：UI 层面先停 runtime 再写 catalog。 */
@@ -292,6 +294,8 @@ export function ComposerBottomBar(props: {
 	/** 浮层开关状态上报（模型目录懒加载武装用）。 */
 	onModelPopoverOpenChange?: (open: boolean) => void;
 	onCompact: () => void;
+	overflowRecoveryTarget?: SessionRuntimeTarget;
+	onOverflowRecovery?: (target: SessionRuntimeTarget) => void;
 	onChangeMode: (mode: ComposerAgentMode) => void;
 	/** 会话已有生图消息时锁定生图模式，下拉不可切走。 */
 	imageGenLocked?: boolean;
@@ -547,6 +551,8 @@ export function ComposerBottomBar(props: {
 							sessionId={props.sessionId}
 							state={props.state}
 							onCompact={props.onCompact}
+							overflowRecoveryTarget={props.overflowRecoveryTarget}
+							onOverflowRecovery={props.onOverflowRecovery}
 							backend={usageBackend}
 							// 未激活会话用会话记录/默认 model 推导的 provider 查用量（用量不依赖 agent 运行）
 							fallbackProvider={modelProvider}
@@ -737,6 +743,7 @@ export function ModelPicker(
 	props: ModelPickerSource & {
 		onClose: () => void;
 		onPick: (model: AvailableModel) => void;
+		onClear?: () => void;
 		onToggleFavorite?: (provider: string, modelId: string) => void;
 		onToggleHideModel?: (provider: string, modelId: string) => void;
 	},

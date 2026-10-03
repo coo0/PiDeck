@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import * as fsPromises from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 import test from "node:test";
 
 const turnExecution = readFileSync("src/renderer/src/components/session/turn/useTurnExecution.ts", "utf8");
@@ -38,10 +42,83 @@ test("queued prompt drains bump the new-turn collapse tick", () => {
 	assert.ok(bumpIndex > acceptedIndex, "tick bump happens only after accepted");
 });
 
-test("new-turn collapse stays enabled by default in both settings layers", () => {
-	// 设置②（collapsePrevRunsOnNewTurn）默认开启，保证新一轮折叠对新会话默认生效。
-	assert.match(appUiAtoms, /collapsePrevRunsOnNewTurn: true/);
-	assert.match(settingsStore, /collapsePrevRunsOnNewTurn: true/);
+test("new-turn collapse is unconditional: the switch is gone from every layer", () => {
+	// 开关已删除（用户要求恒定开启）：契约/默认值/UI/i18n 任何一层残留 key，
+	// 都会让人以为还能关（或让旧 UI 读一个没人写的字段）。
+	const layers = [
+		["shared types", readFileSync("src/shared/types/settings.ts", "utf8")],
+		["App 首屏默认值", app],
+		["TurnFlowSettings", appUiAtoms],
+		["useTurnExecution", turnExecution],
+		["TurnRow", turnRow],
+		["CommonTab", readFileSync("src/renderer/src/components/app/settings/CommonTab.tsx", "utf8")],
+		["unsavedChangesSummary", readFileSync("src/renderer/src/components/app/settings/unsavedChangesSummary.ts", "utf8")],
+		["settingsFieldAnchors", readFileSync("src/renderer/src/utils/settingsFieldAnchors.ts", "utf8")],
+		["previewApi", readFileSync("src/renderer/src/previewApi.ts", "utf8")],
+		["i18n zh-CN", readFileSync("src/renderer/src/i18n/rendererCopy.zh-CN.ts", "utf8")],
+		["i18n en-US", readFileSync("src/renderer/src/i18n/rendererCopy.en-US.ts", "utf8")],
+	];
+	for (const [label, source] of layers) {
+		assert.doesNotMatch(source, /collapsePrevRunsOnNewTurn/, `${label} 不应再引用已删除的开关`);
+	}
+	// SettingsStore 只保留迁移用的字面量（清理旧字段），默认值不得再出现。
+	assert.doesNotMatch(settingsStore, /collapsePrevRunsOnNewTurn:\s*true/);
+	// 行为无条件：初始态与 effect 都不再读开关。
+	assert.doesNotMatch(turnExecution, /if \(!opts\.collapsePrevRunsOnNewTurn\) return;/);
+});
+
+// 迁移通过真实 load / 文件验证，避免把吞掉保存失败的实现锁进静态断言。
+function makeMigrationStore(t, failWrite = false) {
+	const root = mkdtempSync(join(tmpdir(), "pideck-collapse-setting-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	let writes = 0;
+	const failure = new Error("migration write failed");
+	const { SettingsStore } = loadTsCommonJs("src/main/settings/SettingsStore.ts", {
+		stubs: {
+			electron: { app: { getPath: () => root }, BrowserWindow: class {}, Menu: { setApplicationMenu() {} } },
+			"../logging/sharedLogger": { getAppLogger: () => undefined },
+			"../git/gitExecutable": { setConfiguredGitPath() {} },
+			"node:fs/promises": {
+				...fsPromises,
+				async writeFile(...args) {
+					writes++;
+					if (failWrite) throw failure;
+					return fsPromises.writeFile(...args);
+				},
+			},
+		},
+	});
+	writeFileSync(
+		join(root, "settings.json"),
+		JSON.stringify({
+			installationType: process.env.PORTABLE_EXECUTABLE_DIR === undefined ? "installed" : "portable",
+			chatContentWidthPct: 80,
+			updateSourceAtomgitMigrated: true,
+			collapsePrevRunsOnNewTurn: false,
+			autoSessionTitle: true,
+			webServiceHost: "127.0.0.1",
+		}),
+	);
+	return { store: new SettingsStore(), root, failure, writes: () => writes };
+}
+
+test("SettingsStore 启动时清理旧开关字段并落盘一次", async (t) => {
+	const { store, root, writes } = makeMigrationStore(t);
+	await store.load();
+	assert.equal("collapsePrevRunsOnNewTurn" in store.get(), false);
+	const persisted = JSON.parse(readFileSync(join(root, "settings.json"), "utf8"));
+	assert.equal("collapsePrevRunsOnNewTurn" in persisted, false);
+	assert.equal(persisted.autoSessionTitle, true);
+	assert.equal(persisted.webServiceHost, "127.0.0.1");
+	assert.equal(writes(), 1);
+	await store.load();
+	assert.equal(writes(), 1, "没有旧字段时不再写盘");
+});
+
+test("SettingsStore 旧开关迁移写盘失败时 load 拒绝", async (t) => {
+	const { store, failure, writes } = makeMigrationStore(t, true);
+	await assert.rejects(store.load(), (error) => error === failure);
+	assert.equal(writes(), 1);
 });
 
 test("manual/streaming expansion is remembered across remounts (session-scoped)", () => {

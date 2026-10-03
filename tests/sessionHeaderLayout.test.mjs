@@ -59,7 +59,10 @@ test("model-picker restart must light the SessionView overlay via restartActiveA
 	assert.match(runtimeInjector, /isRestarting=\{runtime\.isRestartingThisAgent\}/);
 	assert.match(controller, /isRestartingThisAgent = restartingAgentId === activeAgentId/);
 	assert.match(app, /setRestartingAgentId\(restartingAgent\.id\)/);
-	assert.match(picker, /await restartActiveAgent\(intent\.agentId\)/);
+	// 完整 runtime triple 保存在确认意图里并校验；共享重启入口仍接收 agentId。
+	// thinkingPendingDisplay 的生产 controller 行为测试覆盖实际确认与换代拒绝。
+	assert.match(picker, /if\s*\(!handleIsCurrent\(intent\.handle\)\)\s*return/);
+	assert.match(picker, /await\s+restartActiveAgent\(intent\.handle\.agentId\)/);
 	assert.doesNotMatch(picker, /desktopApi\.sessions\.restartRuntime/);
 });
 

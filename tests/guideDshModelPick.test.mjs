@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { createStore } from "jotai/vanilla";
 
 import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
@@ -105,11 +106,84 @@ test("resolveGuideDisplayModel：pi 点选不得泄漏到 DSH（后端隔离）"
 
 // ── 3. 首次发送必须把 DSH 偏好作为显式模型带入 ────────────────────────────────
 
-test("首次发送：DSH 会话把引导页点选作为显式 model 传给 createDraft", () => {
+/** 执行 App 的创建参数原文，不复制模型分支；生产 atom 由统一 TS helper 加载。 */
+async function createGuideDraft(store, atoms, draftBackend) {
 	const app = readFileSync("src/renderer/src/App.tsx", "utf8");
-	const body = app.slice(app.indexOf("const ensureSessionForSend = useCallback("), app.indexOf("// 把用户消息搬进真实会话缓存"));
-	// 后端为 dsh 时必须读 DSH 偏好（pi 偏好在 DSH 会话下语义不适用）。
-	assert.match(body, /readWelcomeDshModelPreference\(\)/, "首次发送没有读取 DSH 引导页偏好 → host 只能用部署默认（issue #253 症状 3）");
-	// 该偏好必须作为 model 传入（不是 welcomeModel：welcomeModel 是 pi 侧的解析输入）。
-	assert.match(body, /model:\s*(welcomeModel|draftModel)/, "DSH 点选没有作为显式 model 传给 createDraft");
+	const start = app.indexOf("const welcomeModel =", app.indexOf("const ensureSessionForSend = useCallback("));
+	const end = app.indexOf("upsertSession(session);", start);
+	assert.ok(start >= 0 && end > start, "首次发送的创建片段必须存在");
+	const body = app.slice(start, end);
+	assert.match(body, /store\.get\(welcomeModelPreferenceAtom\)/);
+	assert.match(body, /model:\s*welcomeModel/, "DSH 必须显式传 model，不是 pi 的 welcomeModel");
+	let received;
+	const run = new Function("store", "welcomeModelPreferenceAtom", "welcomeThinkingLevelAtom", "draftBackend", "project", "api", `return (async () => { ${body}\nreturn session; })();`);
+	await run(
+		store,
+		atoms.welcomeModelPreferenceAtom,
+		atoms.welcomeThinkingLevelAtom,
+		draftBackend,
+		{ id: "project", name: "项目" },
+		{
+			sessions: {
+				createDraft: async (input) => {
+					received = input;
+					return { id: "draft" };
+				},
+			},
+		},
+	);
+	return plain(received);
+}
+
+function loadWelcomeAtoms(localStorage) {
+	return createTsSandbox({ globals: { localStorage } })("src/renderer/src/atoms/welcome-preference-atoms.ts");
+}
+
+const piModel = { provider: "pi-provider", modelId: "pi-model", modelName: "Pi" };
+const dshModel = { provider: "jiyuan", modelId: "deepseek-flash", modelName: "deepseek-flash" };
+
+test("首次发送：共享 atom 兼容旧独立键，DSH 显式模型与 pi 后端隔离", async () => {
+	const { api } = createLocalStorage();
+	const bootstrap = loadBootstrap(api);
+	api.setItem(bootstrap.WELCOME_MODEL_KEY, JSON.stringify(piModel));
+	api.setItem(bootstrap.WELCOME_DSH_MODEL_KEY, JSON.stringify(dshModel));
+	const atoms = loadWelcomeAtoms(api);
+	const store = createStore();
+	const dsh = await createGuideDraft(store, atoms, "dsh");
+	assert.deepEqual(dsh.model, dshModel);
+	assert.equal(dsh.backend, "dsh");
+	assert.equal(dsh.welcomeModel, undefined);
+	const pi = await createGuideDraft(store, atoms, "pi");
+	assert.deepEqual(pi.welcomeModel, piModel);
+	assert.equal(pi.backend, "pi");
+	assert.equal(pi.model, undefined);
+});
+
+test("共享 atom 点选持久化独立键，清除 DSH 不丢 pi，首次发送不携带旧模型", async () => {
+	const { api } = createLocalStorage();
+	const bootstrap = loadBootstrap(api);
+	const atoms = loadWelcomeAtoms(api);
+	const store = createStore();
+	store.set(atoms.welcomeModelPreferenceAtom, { pi: piModel, dsh: dshModel });
+	assert.deepEqual(JSON.parse(api.getItem(bootstrap.WELCOME_MODEL_KEY)), piModel);
+	assert.deepEqual(JSON.parse(api.getItem(bootstrap.WELCOME_DSH_MODEL_KEY)), dshModel);
+	assert.deepEqual((await createGuideDraft(store, atoms, "dsh")).model, dshModel);
+	store.set(atoms.welcomeModelPreferenceAtom, { pi: piModel });
+	assert.equal(api.getItem(bootstrap.WELCOME_DSH_MODEL_KEY), null);
+	assert.deepEqual(JSON.parse(api.getItem(bootstrap.WELCOME_MODEL_KEY)), piModel);
+	const draft = await createGuideDraft(store, atoms, "dsh");
+	assert.equal(Object.hasOwn(draft, "model"), false);
+	assert.equal(Object.hasOwn(draft, "welcomeModel"), false);
+});
+
+test("存储写入失败时，首次发送仍使用共享 atom 中新点选的显式 DSH 模型", async () => {
+	const { api } = createLocalStorage();
+	const atoms = loadWelcomeAtoms(api);
+	const store = createStore();
+	api.setItem = () => {
+		throw new Error("storage unavailable");
+	};
+	store.set(atoms.welcomeModelPreferenceAtom, { pi: piModel, dsh: dshModel });
+	assert.deepEqual((await createGuideDraft(store, atoms, "dsh")).model, dshModel);
+	assert.deepEqual((await createGuideDraft(store, atoms, "pi")).welcomeModel, piModel);
 });

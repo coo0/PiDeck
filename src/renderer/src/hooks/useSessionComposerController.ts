@@ -1,6 +1,6 @@
 import { useAtomValue, useSetAtom, useStore } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import type { AgentBackend, ChatMessage, ComposerAgentMode, FileTreeNode, ImageContent, PiCommand, ResolvedLaunchDefaults, SessionSummary } from "../../../shared/types";
+import type { AgentBackend, ChatMessage, ComposerAgentMode, FileTreeNode, ImageContent, PiCommand, ResolvedLaunchDefaults, SessionRuntimeTarget, SessionSummary } from "../../../shared/types";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../../shared/imageGenParams";
 import { resolveBusySendDelivery } from "../../../shared/busySendDelivery";
 import { FILE_TREE_ABSOLUTE_MAX_DEPTH } from "../../../shared/fileTree";
@@ -57,6 +57,7 @@ import { formatFilePathRef, type ComposerChip } from "../components/session/comp
 import type { ComposerCaretRequest } from "../components/session/composer/types";
 import { getComposerCaretCoords, getComposerCaretOffset, getComposerCaretBlockEdge, getComposerSelectionRange, isComposerAtVisualEdge } from "../components/session/composer/caretCoords";
 import { desktopApi } from "../desktopApi";
+import { useAskPanel } from "./useAskPanel";
 import { formatBytes } from "../../../shared/formatBytes";
 import { t } from "../i18n";
 import { COMPOSER_IMAGE_MAX_BYTES, ComposerImageError, dataUrlToFile, getClipboardImageFiles, getDroppedImageFiles, imageMimeTypeFromPath, isImageFilePath, processComposerImageFile } from "../utils/composerImages";
@@ -65,6 +66,7 @@ import { resolveBackendSwitchDefaults } from "../utils/backendSwitchDefaults";
 import { GUIDE_BOOTSTRAP_SESSION_ID, readWelcomeBackendPreference, resolveGuidePageBackend, WELCOME_BACKEND_KEY } from "../utils/chatSessionBootstrap";
 import { showNotice } from "../utils/notice";
 import { requireSessionCommand, toSessionRuntimeTarget } from "../utils/sessionCommands";
+import { buildDraftResourceCommands, draftResourceCommandsForProject, selectComposerSuggestionCommands, type DraftResourceCommandSnapshot } from "../utils/draftResourceCommands";
 import { isSessionRuntimeBusy, isUserFacingSessionStart } from "./useSessionTimelineController";
 import { truncateQuoteLabel } from "../components/session/composer/quoteChip";
 import { useSessionSend, type EnqueuePromptSnapshot } from "./useSessionSend";
@@ -414,6 +416,7 @@ export function useSessionComposerController(options: UseSessionComposerControll
 	const [imageGenOutputFormat, setImageGenOutputFormatState] = useState(DEFAULT_IMAGE_GEN_OUTPUT_FORMAT);
 	const [picker, setPicker] = useState<ComposerPickerKind | null>(null);
 	const [commands, setCommands] = useState<PiCommand[]>([]);
+	const [draftResourceCommandSnapshot, setDraftResourceCommandSnapshot] = useState<DraftResourceCommandSnapshot>({ projectId: undefined, commands: [] });
 	const [files, setFiles] = useState<FileTreeNode[]>([]);
 	// @ 引用懒加载状态：已按 maxDepth 0 拉过子项的目录绝对路径（防重复请求），
 	// 与在途加载集合成对出现；目录不在任一集合才能发新请求。
@@ -763,6 +766,39 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		};
 	}, [isDshBackend, runtime?.agentId, runtime?.runtimeGeneration, sessionId]);
 
+	// Draft sessions have no Pi process to ask for get_commands. Discover the same local
+	// skills/prompts Pi will load; as soon as a runtime exists, its RPC list is authoritative.
+	useEffect(() => {
+		if (isDshBackend || runtime?.agentId) {
+			setDraftResourceCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
+			return;
+		}
+		let current = true;
+		setDraftResourceCommandSnapshot({ projectId: effectiveProjectId, commands: [] });
+		const globalSkills = desktopApi.skills
+			.list()
+			.then((result) => result.skills)
+			.catch(() => []);
+		const projectSkills = effectiveProjectId ? desktopApi.projectResources.list(effectiveProjectId).catch(() => undefined) : Promise.resolve(undefined);
+		const discovered = desktopApi.projectResources.discovery(effectiveProjectId ?? undefined).catch(() => ({ projectResourcesAllowed: false, overrides: { disabledGlobalExtensions: [], disabledGlobalSkills: [], disabledGlobalPrompts: [] }, skills: [], prompts: [], extensions: [] }));
+		void Promise.all([globalSkills, projectSkills, discovered]).then(([global, project, resources]) => {
+			if (!current) return;
+			const skills = [...(project?.skills ?? []), ...global, ...resources.skills];
+			const prompts = [...templates, ...resources.prompts];
+			setDraftResourceCommandSnapshot({
+				projectId: effectiveProjectId,
+				commands: buildDraftResourceCommands(skills, prompts, {
+					projectResourcesAllowed: resources.projectResourcesAllowed,
+					disabledGlobalSkillKeys: resources.overrides.disabledGlobalSkills,
+					disabledGlobalPromptNames: resources.overrides.disabledGlobalPrompts,
+				}),
+			});
+		});
+		return () => {
+			current = false;
+		};
+	}, [effectiveProjectId, isDshBackend, runtime?.agentId, templates]);
+
 	useEffect(() => {
 		templateRequestGateRef.current.invalidate(templateKey);
 		setTemplateState({ key: templateKey, items: [] });
@@ -783,7 +819,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		if (entries.length === 0) return undefined;
 		return new Map(entries.map(([id, snippet]) => [id, truncateQuoteLabel(snippet.text)]));
 	}, [sessionQuotes]);
-	const suggestionItems = useMemo(() => (suggestionsOpen ? buildSuggestionItems(draft, cursor, commands, flatFiles, projectSessions) : []), [commands, cursor, draft, flatFiles, projectSessions, suggestionsOpen]);
+	const draftResourceCommands = draftResourceCommandsForProject(draftResourceCommandSnapshot, effectiveProjectId);
+	const suggestionCommands = selectComposerSuggestionCommands(isDshBackend, Boolean(runtime?.agentId), commands, draftResourceCommands);
+	const suggestionItems = useMemo(() => (suggestionsOpen ? buildSuggestionItems(draft, cursor, suggestionCommands, flatFiles, projectSessions) : []), [cursor, draft, flatFiles, projectSessions, suggestionCommands, suggestionsOpen]);
 
 	// @ 引用向下钻取：随输入懒加载子目录（maxDepth 0 只拉一层，与文件抽屉同语义）。
 	// 修复 maxDepth 0 化后只能引用到项目根一层（71d27ed1 为保主进程响应把 8 层递归改成
@@ -989,7 +1027,9 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		enqueue,
 	});
 
-	// 生图：凭据来自独立 imagegen.json（供应商 + 模型），不读会话 LLM。
+	// 并行发送（拆分菜单「并行发送」）：把当前草稿文本送进独立 Ask 会话后台处理，不打断当前会话。
+	// useAskPanel 内部用全局 atom 管会话/胶囊状态，会话各处共享同一实例，重复调用安全。
+	const askPanel = useAskPanel();
 	// 结果按「消息」语义上屏（与 useSessionSend 乐观提交同一约定：写时间线缓存、source=runtime）：
 	// 提示词作为 user 消息立即上屏；随后追加一条 assistant「生图占位」消息（meta.imageGen=generating），
 	// 生成期间由 FinalAnswer 渲染 beUI ImageGeneration 点阵动画，完成后原地更新为 complete（图片清晰过渡），
@@ -1858,6 +1898,10 @@ export function useSessionComposerController(options: UseSessionComposerControll
 		 *  resolveGuideDisplayModel 在本值之上叠加，次序与主进程 resolveLaunchDefaultOptions 一致。 */
 		bootstrapDefaultModel: bootstrapDefaults?.model,
 		bootstrapDefaultThinkingLevel: bootstrapDefaults?.thinkingLevel,
+		/** 每模型默认思考档位表（pi settings.modelThinkingLevels）：引导页改选模型后，
+		 *  底栏/选择器按当前展示的模型反查，与 createDraft 按最终模型查表同序。
+		 *  非 DSH 后端才会带上（主进程已按后端裁剪）。 */
+		bootstrapModelThinkingLevels: bootstrapDefaults?.modelThinkingLevels,
 		draft,
 		attachments,
 		mode,
@@ -1929,6 +1973,15 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			send: () => {
 				void promoteAndSend(resolveBusySendDelivery(isBusy, store.get(busySendDeliveryAtom)));
 			},
+			// 拆分菜单（发送钮右侧 caret）：把「加入当前回合 / 排队到下一轮 / 并行发送」前置到发送现场。
+			// 主钮仍走「忙碌时投递行为」设置；这三项是显式覆盖，不受设置影响。
+			// steer = 立刻插队进当前回合（仅忙碌时有意义）；followUp = 排队到下一轮再排空。
+			sendSteer: () => {
+				void promoteAndSend("steer");
+			},
+			sendFollowUp: () => {
+				void promoteAndSend("followUp");
+			},
 			/**
 			 * 快捷消息直发：正文来自弹框清单而非草稿，其余语义与普通发送一致
 			 * （预览 Tab 晋升、忙碌时按「忙碌时投递行为」设置决定 steer / 排队）。
@@ -1944,8 +1997,23 @@ export function useSessionComposerController(options: UseSessionComposerControll
 			 * 快捷消息的正文来自清单，发它的时候输入框通常是空的。
 			 */
 			canSendQuickMessage: !isStarting && !generatingImage && (!isDshBackend || runtime?.state?.modelRoutable !== false),
+			// 并行发送（拆分菜单）：当前草稿文本进独立 Ask 会话后台处理，成功后清空草稿。
+			// 仅投递纯文本：并行问询不支持图片附件（与队列面板 onSendAsk 的 canAsk 判据一致），
+			// 带图时 ComposerSendControls 端按 canSendParallel=false 置灰。
+			canSendParallel: Boolean(draft.trim()) && attachments.length === 0 && !isStarting && !generatingImage && Boolean(effectiveProjectId),
+			sendParallel: () => {
+				const text = draft.trim();
+				if (!text || !effectiveProjectId) return;
+				void askPanel.sendToAsk(effectiveProjectId, text, { originSessionId: sessionId }).then((ok) => {
+					// 并行会话已接管这条问题：成功后清空当前草稿，避免用户重复发送同一句。
+					if (ok) setDraft("");
+				});
+			},
 			abort: () => void abort(),
 			compact: () => void compact(),
+			// 上下文超限失败时，即使 contextPercent 缺失，仍保留当前绑定作为压缩恢复目标。
+			overflowRecoveryTarget: runtime?.state?.contextOverflow ? toSessionRuntimeTarget(sessionId, runtime) : undefined,
+			onOverflowRecovery: (target: SessionRuntimeTarget) => void runManualCompact(target),
 			imageGenConfig,
 			imageGenProviderId: activeImageGenProviderId,
 			imageGenModelId: activeImageGenModelId,

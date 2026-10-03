@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { FoldVertical } from "lucide-react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { t } from "../../i18n";
-import type { AgentRuntimeState } from "../../../../shared/types";
+import type { AgentRuntimeState, SessionRuntimeTarget } from "../../../../shared/types";
 import type { UsageProbeBackend } from "../../../../shared/types/providerUsage";
 import { compactUiState, resolveCompactUsagePercent } from "../../../../shared/compactFeedback";
 import { openSettingsAtom, contextSpendAnimationAtom } from "../../atoms/app-ui-atoms";
@@ -145,10 +145,12 @@ export function SessionContextMeter(props: {
 	sessionId: string;
 	state?: Pick<
 		AgentRuntimeState,
-		"contextPercent" | "contextTokens" | "contextWindow" | "contextMessageTokens" | "cacheHitPercent" | "cacheHitAveragePercent" | "cacheHitSampleCount" | "inputTokens" | "outputTokens" | "isCompacting" | "cost" | "ttftMs" | "totalMs" | "tps" | "cacheRead" | "cacheWrite" | "cacheTotal" | "provider"
+		"contextPercent" | "contextTokens" | "contextWindow" | "contextOverflow" | "contextMessageTokens" | "cacheHitPercent" | "cacheHitAveragePercent" | "cacheHitSampleCount" | "inputTokens" | "outputTokens" | "isCompacting" | "cost" | "ttftMs" | "totalMs" | "tps" | "cacheRead" | "cacheWrite" | "cacheTotal" | "provider"
 	>;
 	/** 压缩上下文（原右上角紧凑徽章动作，迁入面板底部） */
 	onCompact?: () => void;
+	overflowRecoveryTarget?: SessionRuntimeTarget;
+	onOverflowRecovery?: (target: SessionRuntimeTarget) => void;
 	/**
 	 * 运行时缺省时的 provider 兜底（由会话记录/默认 model 推导）：用量查询只依赖
 	 * provider 配置解析端点、不依赖 agent 运行，未激活/未启动会话也可查用量。
@@ -266,8 +268,9 @@ export function SessionContextMeter(props: {
 	// 无 capacity 数据（会话未运行/模型切换瞬间）也渲染占位环：0% 空环 +「暂不可用」提示，
 	// 保证底部栏圆环常驻。contextOccupancy 语义不变（仍返回 null 供面板内部判断）。
 	const percent = context?.percent ?? 0;
+	const overflowRecovery = props.state?.contextOverflow === true;
 	// 低占用保留有效数字（1M 窗口下 408 tokens ≈ 0.04%，不显示成「0%」）
-	const reading = context !== null ? t("sessionContext.used", { percent: formatPercent(percent) }) : t("sessionContext.unavailable");
+	const reading = context !== null ? t("sessionContext.used", { percent: formatPercent(percent) }) : overflowRecovery ? t("sessionContext.overflow") : t("sessionContext.unavailable");
 	const figures = context !== null && [context.usedTokens, context.contextWindow].every((v) => v != null) ? `~${formatTokens(context.usedTokens!)} / ${formatTokens(context.contextWindow!)}` : undefined;
 	// host contextBreakdown 三段占用条（dsh-web 同宽算法：各自占 breakdownTotal 份额 × percent）
 	const breakdownSegments =
@@ -292,12 +295,13 @@ export function SessionContextMeter(props: {
 	// 外观设置开关（默认开）：**只做渲染层隐藏**，不入队逻辑与 CSS 均不受影响。
 	// 关掉时元素根本不进 DOM，动画自然不显示；消耗统计与圆环数字照常更新。
 	const spendAnimationEnabled = useAtomValue(contextSpendAnimationAtom);
-	const showCompact = props.onCompact !== undefined;
+	const compactOverflow = overflowRecovery;
 	// 压缩按钮态走共享策略：无占用数据（percent 未上报）禁用；压缩中禁用。
 	// 传 context?.percent 而非 ?? 0 后的 percent：占位环需要 0，但未就绪判定
 	// 必须以「是否有真实数据」为准（percent=0 的真实数据也允许压缩）。
 	const compactUi = compactUiState(context?.percent, compacting);
-	const compactDisabled = compactUi.compacting || !compactUi.ready;
+	const compactDisabled = compactUi.compacting || (!compactUi.ready && !overflowRecovery);
+	const showCompact = props.onCompact !== undefined || (compactOverflow && props.overflowRecoveryTarget !== undefined && props.onOverflowRecovery !== undefined);
 	const compactUrgency = compactUi.urgency === "danger" ? "text-destructive border-destructive/40 hover:bg-destructive/10" : compactUi.urgency === "warn" ? "text-amber-500 border-amber-500/40 hover:bg-amber-500/10" : "border-border hover:bg-muted/60";
 
 	return (
@@ -480,7 +484,11 @@ export function SessionContextMeter(props: {
 								data-testid="session-context-compact"
 								disabled={compactDisabled}
 								title={compactUi.compacting ? t("sessionContext.compacting") : compactUi.ready ? t("sessionContext.compact") : t("sessionContext.compactNotReadyHint")}
-								onClick={props.onCompact}
+								// onClick={props.onCompact}
+								onClick={() => {
+									if (compactOverflow && props.overflowRecoveryTarget && props.onOverflowRecovery) props.onOverflowRecovery(props.overflowRecoveryTarget);
+									else props.onCompact?.();
+								}}
 								className={`mt-2 flex h-7 w-full items-center justify-center gap-1.5 rounded-md border bg-transparent text-xs font-medium transition-colors disabled:cursor-default disabled:opacity-60 ${compactUrgency}`}
 							>
 								<FoldVertical size={13} className={compactUi.compacting ? "animate-pideck-spin" : undefined} />

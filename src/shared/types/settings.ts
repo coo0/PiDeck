@@ -24,12 +24,13 @@ export type WebNetworkAddress = {
 	interfaceName: string;
 	cidr: string | null;
 	isPrivate: boolean;
+	family: "IPv4" | "IPv6";
 };
 /** 文件/Git Diff 在中间栏的默认打开方式：分屏与会话并排，或占满中间栏 */
 export type WorkspaceContentOpenMode = "split" | "maximize";
 /** 会话 Tab 打开模式：preview=单击为临时预览（发消息后自动晋升常驻），permanent=单击即常驻共存 */
 export type SessionTabOpenMode = "preview" | "permanent";
-export type AppFontSizeMode = "compact" | "default" | "medium" | "large" | "xlarge";
+export type AppFontSizeMode = "compact" | "medium" | "large" | "xlarge";
 
 /** 更新源：atomgit = 国内 AtomGit 源（默认首选）；github = 官方 GitHub Release。 */
 export type UpdateSourceId = "atomgit" | "github";
@@ -53,6 +54,14 @@ export type MirrorHealthResult = {
 
 /** 宠物缩放默认值：0.3 = 设置滑块 30%。出厂 100% 太大，新用户/缺省回退都用此值。 */
 export const DEFAULT_PET_SCALE = 0.3;
+/** toast 展示时长（ms）出厂值：全局统一时长，与渲染层 notice.ts 常量一致。 */
+export const DEFAULT_TOAST_DURATION_MS = 4000;
+/**
+ * toast 时长「常驻（不自动消失）」哨兵值。
+ * 必须用有限数：设置落盘走 settings.json，`JSON.stringify(Infinity)` 会变成 null，
+ * 升级后读回即丢失。渲染层在 configureNoticeDefaults 里把哨兵映射回 POSITIVE_INFINITY。
+ */
+export const TOAST_DURATION_STICKY_MS = -1;
 export type AppFontBaseMode = "system" | "sans" | "serif" | "custom";
 export type AppFontMonoMode = "system-mono" | "custom";
 /** 主窗口启动尺寸预设：last=上次关闭时的窗口大小（读不到时顺延默认）；fullscreen 占满屏幕，maximized 最大化，其余为固定窗口 */
@@ -111,7 +120,8 @@ export type AppSettings = {
 	sessionTabOpenMode: SessionTabOpenMode;
 	/**
 	 * 是否在首轮 agent 成功结束后，用当前 pi 模型异步生成会话标题。
-	 * 默认关闭以避免用户无感知地产生额外模型调用和 token 消耗；设置只在新建或重启 Agent 进程时注入，关闭不影响已有会话的主 agent。
+	 * 默认开启，让侧栏自动获得可读标题；会额外消耗一次模型调用和少量 token（设置说明已写明）。
+	 * 设置只在新建或重启 Agent 进程时注入，关闭不影响已有会话的主 agent。
 	 */
 	autoSessionTitle: boolean;
 	/**
@@ -177,6 +187,14 @@ export type AppSettings = {
 	 * 弹出时机由渲染层忙碌检测控制（输入中/模态打开/窗口隐藏时延迟），与本开关解耦。
 	 */
 	announcementNotificationEnabled: boolean;
+	/**
+	 * 应用内 toast 的展示时长（ms），全局统一口径：所有提示（含调用方显式传入的时长、
+	 * error/warning/question 档）都按此值停留，只有调用方要求「常驻」的提示不受影响。
+	 * 起因是扩展 ctx.ui.notify 等提示硬编码 1500ms，用户普遍反馈来不及看。
+	 * 取值：有限正数毫秒（主进程钳制 1000–60000）或 TOAST_DURATION_STICKY_MS(-1)=常驻；
+	 * 非法值读取时钳回默认。渲染层把哨兵映射为 Number.POSITIVE_INFINITY。
+	 */
+	toastDurationMs: number;
 	/** 是否在会话中显示模型思考过程，默认开启 */
 	showThinking: boolean;
 	/**
@@ -186,10 +204,11 @@ export type AppSettings = {
 	 */
 	expandInterimDuringStream: boolean;
 	/**
-	 * 新一轮（用户发送新消息）开始时自动收起上一轮展开的中间过程，节省渲染资源。
-	 * true（默认）：发送新消息后收起所有非最新轮（含手动展开的）；false：保持现状。
+	 * 时间线是否按「过程组」显示（实验特性）。
+	 * true（默认）：一轮里连续的思考与工具调用合并成过程组，点开组头才展开明细；
+	 * false：保持平铺显示（连续思考/工具调用逐条铺开）。
 	 */
-	collapsePrevRunsOnNewTurn: boolean;
+	processGroupDisplay: boolean;
 	/** 是否开启开发者控制台（DevTools） */
 	showDevTools: boolean;
 	/**
@@ -229,20 +248,31 @@ export type AppSettings = {
 	desktopProxyUrl: string;
 	/** 桌面端代理绕过列表，对应 Electron proxyBypassRules */
 	desktopProxyBypass: string;
-	/** 用户手动指定的 pi CLI 命令路径，自动检测不到时用于兜底 */
+	/** 用户手动指定的 pi CLI 命令路径，自动检测不到时用于兜底；同时也是「当前使用」的指针 */
 	customPiPath: string;
+	/**
+	 * 用户自己添加的 pi 候选路径（设置页列表里可随时切换）。
+	 * 与 customPiPath 的分工：本字段只是“备选池”，只影响列表展示与切换；
+	 * 真正生效的永远只有 customPiPath 那一条——启动 pi / 更新 / 扩展管理都只读它。
+	 */
+	piCustomPaths: string[];
 
 	/** 是否发送匿名、低频、最小字段的使用统计 */
 	telemetryEnabled: boolean;
 	/** 是否开启局域网 Web 服务 */
 	webServiceEnabled: boolean;
 	/**
-	 * Web 服务监听地址。默认 127.0.0.1（仅本机）：绑定到网卡（0.0.0.0/局域网 IP）
-	 * 会让同网段任意主机访问本机的会话/文件，因此默认不对外暴露，需用户显式改。
+	 * Web 服务监听地址。默认 0.0.0.0（绑定到所有网卡）：同网段任意主机可访问，
+	 * 需配合 webServiceRequiresAuth 强制令牌校验，避免未授权调用。
 	 */
 	webServiceHost: string;
 	/** Web 服务监听端口 */
 	webServicePort: number;
+	/**
+	 * 鉴权开关。开 = 所有 /api/*（/api/health 除外）需携带访问令牌，环回地址也不例外；
+	 * 默认 true，与默认 0.0.0.0 绑定配合，阻断局域网未授权访问。
+	 */
+	webServiceRequiresAuth: boolean;
 	/** 本地生成的匿名安装标识，不包含账号、路径或机器名 */
 	telemetryInstallId?: string;
 	/** 最近一次发送 app_heartbeat 的本地日期，格式 YYYY-MM-DD */
@@ -273,6 +303,8 @@ export type AppSettings = {
 	 * Tab 按内容收缩（w-fit），短标题的 Tab 不受影响；有前置徽标时上限另加
 	 * SESSION_TAB_BADGE_EXTRA_WIDTH（28px，旧 132px 差值）。外观设置滑杆可调。
 	 */
+	/** Navigation presentation only; does not change session identities. */
+	navigationMode: "tabs" | "simple";
 	sessionTabMaxWidth: number;
 	/**
 	 * 上下文消耗扣血动画（新 token 消耗时从圆环向左飞出 `-N tok`）。
@@ -313,6 +345,15 @@ export type AppSettings = {
 	idleAgentKeepCount: number;
 	/** 闲置判定时长（分钟），默认 60：agent 连续闲置超过该时长才可被释放 */
 	idleAgentTimeoutMin: number;
+
+	// ── CUA（Computer Use Agent）：让 Agent 观察屏幕并注入鼠标/键盘输入 ──
+	/**
+	 * 是否启用 CUA 能力，默认 false。
+	 * 开启后主进程才会监听本地 MCP HTTP 端点并把 `pideck-cua` 写入
+	 * ~/.pi/agent/mcp.json；关闭时不监听、不改动 pi 配置（默认姿态为「关」）。
+	 * 真实输入注入另有每次操作审批门 + 全局/会话杀开关双重兜底。
+	 */
+	cuaEnabled: boolean;
 
 	// ── 模型收藏：ModelPicker 中用 ☆ 标记，收藏的模型在列表中置顶 ──
 	/** 收藏的模型 ID 列表 */
@@ -622,7 +663,8 @@ export type AppSettings = {
 };
 
 /**
- * Web 服务运行时状态；token 每次 start 随机重生成，requiresAuth 仅在非环回绑定时为 true。
+ * Web 服务运行时状态；token 每次 start 随机重生成。
+ * requiresAuth 反映用户设置 webServiceRequiresAuth 的清洗结果，缺省视为 true。
  * 渲染层设置页二维码/令牌提示据此附上访问令牌。
  */
 export type WebServiceStatusInfo = {

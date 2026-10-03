@@ -415,7 +415,15 @@ test("bottom bar wires the meter next to send controls and merges model + thinki
 	const source = bottomBarSource();
 	// ContextMeter 挂在右侧组（git 分支之前、发送控件同组）
 	assert.match(source, /import \{ SessionContextMeter \} from "\.\/SessionContextMeter"/);
-	assert.match(source, /<SessionContextMeter\s*sessionId=\{props\.sessionId\}\s*state=\{props\.state\}\s*onCompact=\{props\.onCompact\}\s*backend=\{usageBackend\}[\s\S]{0,200}?fallbackProvider=\{modelProvider\}/);
+	const meterBlock = source.match(/<SessionContextMeter\b[\s\S]*?\/>/)?.[0];
+	assert.ok(meterBlock, "底栏必须挂载 SessionContextMeter");
+	assert.match(meterBlock, /sessionId\s*=\s*\{\s*props\.sessionId\s*\}/);
+	assert.match(meterBlock, /state\s*=\s*\{\s*props\.state\s*\}/);
+	assert.match(meterBlock, /onCompact\s*=\s*\{\s*props\.onCompact\s*\}/);
+	assert.match(meterBlock, /overflowRecoveryTarget\s*=\s*\{\s*props\.overflowRecoveryTarget\s*\}/);
+	assert.match(meterBlock, /onOverflowRecovery\s*=\s*\{\s*props\.onOverflowRecovery\s*\}/);
+	assert.match(meterBlock, /backend\s*=\s*\{\s*usageBackend\s*\}/);
+	assert.match(meterBlock, /fallbackProvider\s*=\s*\{\s*modelProvider\s*\}/);
 	assert.match(source, /composer-bottom-right ml-auto flex shrink-0 items-center gap-2/);
 	// 模型/思考合并 chip：模型名 · 思考档位 + chevron（dsh ModelSelect trigger 形态，保持原样）
 	assert.match(source, /composer-bar-btn model-thinking/);

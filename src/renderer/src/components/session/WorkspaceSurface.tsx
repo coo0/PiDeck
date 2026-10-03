@@ -240,7 +240,7 @@ function FilesPanel(props: {
 	};
 	return (
 		<div
-			className="files-panel flex min-h-0 flex-1 flex-col overflow-hidden"
+			className={cn("files-panel flex flex-col overflow-x-hidden", searchOpen ? "min-h-0 flex-1 overflow-hidden" : "min-h-full flex-none")}
 			ref={panelRef}
 			tabIndex={-1}
 			onMouseDown={handlePanelMouseDown}
@@ -311,7 +311,8 @@ function FilesPanel(props: {
 					)}
 				</div>
 			</div>
-			<div className={cn("min-h-0 flex-1", searchOpen ? "overflow-hidden" : "overflow-y-auto overscroll-contain")}>
+			{/* 树态随内容增长，由 DrawerSurface 唯一滚动；搜索态保留结果列表的独立滚动。 */}
+			<div className={searchOpen ? "min-h-0 flex-1 overflow-hidden" : "shrink-0"}>
 				{searchOpen ? (
 					<FileSearchResults query={fileSearch.query} onQueryChange={fileSearch.setQuery} results={fileSearch.results} isSearching={fileSearch.isSearching} onViewFile={props.onViewFile} onFileContextMenu={props.onFileContextMenu} onClear={closeSearch} />
 				) : (

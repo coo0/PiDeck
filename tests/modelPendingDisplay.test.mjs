@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 
 const { computeModelDisplay, formatModelRef, resolveComposerLiveModel, resolveGuideDisplayModel } = loadTsCommonJs("src/renderer/src/utils/modelPendingDisplay.ts");
 
@@ -108,6 +109,8 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
 	assert.match(picker, /isLiveRuntimeStatus\(runtime\?\.status\)/);
 
 	assert.match(picker, /setRuntimeModel/);
+	assert.match(picker, /writeSelectedModelToState\(applied\.value\)/);
+	// 模型应用的结果写入由下方真实 controller/hook 行为测试覆盖。
 	assert.match(picker, /error\.code === "SESSION_RUNTIME_BUSY"/);
 	assert.match(picker, /pickModelWhileBusy/);
 	assert.match(picker, /listRuntimeModels\(handle\)/);
@@ -127,6 +130,184 @@ test("契约: 运行中优先直接切换模型，后端 busy 时才排到下一
 	assert.match(sessionIpc, /ipcChannels\.sessionsRuntimeListModels/);
 	assert.match(sessionIpc, /listRuntimeModels\(target\)/);
 	assert.match(preload, /listRuntimeModels: \(target: SessionRuntimeTarget\)/);
+});
+
+// 最小 React 生命周期桩：保留 ref/state，按依赖执行 effect 和配对 cleanup。
+function createModelControllerHarness() {
+	const slots = [];
+	let cursor = 0;
+	let effects = [];
+	const react = {
+		useRef(value) {
+			const index = cursor++;
+			return (slots[index] ??= { current: value });
+		},
+		useState(value) {
+			const index = cursor++;
+			if (!slots[index]) slots[index] = { value };
+			return [
+				slots[index].value,
+				(next) => {
+					slots[index].value = next;
+				},
+			];
+		},
+		useCallback: (callback) => callback,
+		useEffect(callback, dependencies) {
+			const index = cursor++;
+			const previous = slots[index];
+			if (previous && dependencies.every((value, i) => Object.is(value, previous.dependencies[i]))) return;
+			effects.push(() => {
+				previous?.cleanup?.();
+				slots[index] = { dependencies, cleanup: callback() };
+			});
+		},
+	};
+	const atoms = { currentSessionIdAtom: Symbol(), sessionRuntimeByIdAtom: Symbol(), modelPendingByIdAtom: Symbol() };
+	const model = { provider: "test", id: "next", name: "Next" };
+	const selected = { provider: "test", modelId: "next", modelName: "Next" };
+	const writes = [];
+	const calls = [];
+	const notices = [];
+	const state = {
+		record: { id: "s", status: "active", model: { provider: "test", modelId: "old", modelName: "Old" } },
+		runtime: { agentId: "a", runtimeGeneration: 1, status: "running" },
+		models: [model],
+		favoriteModels: [],
+		hiddenProviders: [],
+		hiddenModels: [],
+		thinkingLevels: [],
+		currentModel: { provider: "test", modelId: "old" },
+		modelPending: undefined,
+		upsertSession(record) {
+			writes.push(record);
+			state.record = record;
+		},
+		setModelPending(pending) {
+			state.modelPending = pending;
+		},
+	};
+	const api = {
+		setRuntimeModel: async (...args) => {
+			calls.push(args);
+			return { ok: true, value: { value: selected } };
+		},
+		listRuntimeModels: async () => ({ ok: true, value: { value: [model] } }),
+		updateRecord: async (id, patch) => {
+			const updated = { ...state.record, ...patch };
+			writes.push(updated);
+			return updated;
+		},
+	};
+	const load = createTsSandbox({
+		stubs: {
+			react,
+			jotai: { useStore: () => ({ get: (atom) => (atom === atoms.sessionRuntimeByIdAtom ? { s: state.runtime } : atom === atoms.modelPendingByIdAtom ? { s: state.modelPending } : "s") }) },
+			"../atoms": atoms,
+			"./useSessionPreferenceState": { useSessionPreferenceState: () => state },
+			"../components/session/SessionPaneServices": { useSessionPaneServices: () => ({}) },
+			"../components/session/sessionPickerOptions": { resolveThinkingPickerLevels: () => [] },
+			"../desktopApi": { desktopApi: { sessions: api, app: { onShortcutTriggered: () => () => {} } } },
+			"../utils/notice": { showNotice: (...args) => notices.push(args) },
+			"../i18n": { t: (key) => key },
+			"../atoms/welcome-preference-atoms": {},
+			"../utils/chatSessionBootstrap": {},
+		},
+	});
+	const { useSessionPreferenceController } = load("src/renderer/src/hooks/useSessionPreferenceController.ts");
+	return {
+		state,
+		api,
+		model,
+		selected,
+		writes,
+		calls,
+		notices,
+		render() {
+			cursor = 0;
+			effects = [];
+			const controller = useSessionPreferenceController({ sessionId: "s", pickerOpen: true, thinkingPickerOpen: false, onApplied() {} });
+			for (const effect of effects) effect();
+			return controller;
+		},
+		dispose() {
+			for (const slot of slots) slot?.cleanup?.();
+		},
+	};
+}
+
+async function flushModelEffects() {
+	// 等待 hook 的异步提交及 controller 串行队列，不用真实时间窗口。
+	await new Promise((resolve) => setImmediate(resolve));
+}
+
+test("运行中即时成功使用后端返回模型，且不排队", async (t) => {
+	const h = createModelControllerHarness();
+	t.after(() => h.dispose());
+	const actual = { provider: "test", modelId: "next", modelName: "Backend name" };
+	h.api.setRuntimeModel = async (...args) => {
+		h.calls.push(args);
+		return { ok: true, value: { value: actual } };
+	};
+	await h.render().applyModel(h.model);
+	assert.equal(h.calls.length, 1);
+	assertDisplay(h.calls[0], [{ sessionId: "s", agentId: "a", runtimeGeneration: 1 }, "test", "next", "Next"]);
+	assertDisplay(h.state.record.model, actual);
+	assert.equal(h.state.modelPending, undefined);
+	assert.equal(h.writes.length, 1);
+});
+
+test("只有后端 busy 才排队，空闲后真实 pending hook 重试并清理", async (t) => {
+	const h = createModelControllerHarness();
+	t.after(() => h.dispose());
+	let busy = true;
+	h.api.setRuntimeModel = async (...args) => {
+		h.calls.push(args);
+		return busy ? { ok: false, error: { code: "SESSION_RUNTIME_BUSY" } } : { ok: true, value: { value: h.selected } };
+	};
+	await h.render().applyModel(h.model);
+	assert.equal(h.calls.length, 1, "必须先尝试运行中切换");
+	assertDisplay(h.state.modelPending.to, h.selected);
+	h.render();
+	await flushModelEffects();
+	assert.equal(h.calls.length, 1, "运行中不重试");
+	busy = false;
+	h.state.runtime = { ...h.state.runtime, status: "idle" };
+	h.render();
+	await flushModelEffects();
+	assert.equal(h.calls.length, 2);
+	assert.equal(h.state.modelPending, undefined);
+	assertDisplay(h.state.record.model, h.selected);
+	assert.deepEqual(h.notices, []);
+});
+
+test("旧 runtime 的迟到成功不能写记录或排队", async (t) => {
+	const h = createModelControllerHarness();
+	t.after(() => h.dispose());
+	let finish;
+	h.api.setRuntimeModel = () =>
+		new Promise((resolve) => {
+			finish = resolve;
+		});
+	const result = h.render().applyModel(h.model);
+	await flushModelEffects();
+	h.state.runtime = { agentId: "b", runtimeGeneration: 2, status: "idle" };
+	h.render();
+	finish({ ok: true, value: { value: h.selected } });
+	await result;
+	assert.equal(h.writes.length, 0);
+	assert.equal(h.state.record.model.modelId, "old");
+	assert.equal(h.state.modelPending, undefined);
+});
+
+test("非 busy 错误不排队也不写记录", async (t) => {
+	const h = createModelControllerHarness();
+	t.after(() => h.dispose());
+	h.api.setRuntimeModel = async () => ({ ok: false, error: { code: "SESSION_COMMAND_FAILED" } });
+	await h.render().applyModel(h.model);
+	assert.equal(h.writes.length, 0);
+	assert.equal(h.state.modelPending, undefined);
+	assert.equal(h.notices.length, 1);
 });
 
 // ---- 引导页（无 record）展示决策：必须与主进程 resolveLaunchDefaultOptions 同序 ----

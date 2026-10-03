@@ -94,7 +94,7 @@ export type FileSearchResult = {
 	type: "file" | "directory";
 };
 
-export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor";
+export type SessionSource = "pi" | "codex" | "claude" | "opencode" | "zcode" | "workbuddy" | "cursor" | "qoder";
 export type SessionEnvironment = "native" | "wsl";
 
 /**
@@ -110,14 +110,16 @@ export type SessionProxyOverride = {
 	mode: SessionProxyMode;
 };
 
-/**
- * PiDeck-owned selected model preference. `modelName` is the display label selected from
- * the local model catalog; old records may omit it and render with `modelId` instead.
- */
+/** PiDeck 会话记录里的模型名称快照；运行中 Pi 会话写回 Pi 返回的 model.name。 */
 export type SessionModelPreference = {
 	provider: string;
 	modelId: string;
 	modelName?: string;
+};
+
+/** 成功切换后从运行时读回的实际模型与思考档位。 */
+export type SessionRuntimeModelSelection = SessionModelPreference & {
+	thinkingLevel?: string;
 };
 
 export type SessionSummary = {
@@ -127,6 +129,11 @@ export type SessionSummary = {
 	projectId?: string;
 	projectPath?: string;
 	name?: string;
+	/**
+	 * name 是否来自权威 session_info（false = 首条消息弱回退）；缺省按权威处理。
+	 * catalog 只用它区分所有权：#266 弱回退只能算 fallback，可被扩展模型标题升级。
+	 */
+	nameFromSessionInfo?: boolean;
 	/** 子会话：关联的父会话文件路径。有该字段时不在会话列表顶层显示，而是嵌套在父会话下。 */
 	parentSessionPath?: string;
 	/**
@@ -266,6 +273,14 @@ export type ResolvedLaunchDefaults = {
 	 *  渲染层据此决定欢迎页偏好是否参与展示回退：显式默认存在时偏好被覆盖
 	 *  （用户规则：默认模型 > 偏好 > 上次使用 > 空）。 */
 	defaultModelConfigured?: boolean;
+	/**
+	 * pi settings.json 的「每模型默认档位」表快照（键 `provider/modelId`，见
+	 * shared/modelThinkingLevels.ts）。thinkingLevel 只按解析出的模型算一份，而引导页
+	 * 用户可以改选模型——渲染层拿这张表按**当前展示的模型**反查，才能让底栏显示与
+	 * 创建时实际套用（createDraft 同样按最终模型查表）保持一致。
+	 * 非 DSH 后端且表非空时才返回。
+	 */
+	modelThinkingLevels?: Record<string, string>;
 };
 
 /** sessions.resolve-launch-defaults 入参：只需声明后端；缺省按非 DSH 解析。 */

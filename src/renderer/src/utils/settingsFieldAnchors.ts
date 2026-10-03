@@ -30,6 +30,13 @@ export type SettingsFieldAnchor = {
 };
 
 export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
+	{ tab: "appearance", slug: "appearance-navigation-mode", labelKey: "settings.navigationMode", keywords: ["简洁模式", "标签模式", "simple", "navigation"] },
+	{
+		tab: "notification",
+		slug: "notification-toast-duration",
+		labelKey: "settings.toastDuration",
+		keywords: ["toast", "通知时长", "提示消失", "弹出太快", "notification duration"],
+	},
 	// ── 开发设置 ──────────────────────────────────────────────────────
 	{
 		tab: "dev",
@@ -45,9 +52,11 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 	},
 	{
 		tab: "dev",
-		slug: "dev-custom-pi-path",
-		labelKey: "settings.customPiPath",
-		keywords: ["pi 路径", "自定义路径", "pi path", "nvm", "fnm", "找不到 pi"],
+		slug: "dev-pi-installations",
+		// 原「自定义 pi 路径」输入框已并入这块列表（检测到的安装 + 我添加的路径），
+		// 锚点必须跟着走：留在旧 id 上会让命令面板点进去静默无反应。
+		labelKey: "settings.piInstallationsTitle",
+		keywords: ["pi 路径", "自定义路径", "pi path", "nvm", "fnm", "找不到 pi", "多个 pi", "选择 pi", "浏览"],
 	},
 	{
 		tab: "dev",
@@ -167,9 +176,9 @@ export const SETTINGS_FIELD_ANCHORS: readonly SettingsFieldAnchor[] = [
 	},
 	{
 		tab: "common",
-		slug: "common-collapse-prev-runs",
-		labelKey: "settings.collapsePrevRunsOnNewTurn",
-		keywords: ["折叠历史轮次", "折叠", "collapse", "上一轮", "收起"],
+		slug: "common-process-group-display",
+		labelKey: "settings.processGroupDisplay",
+		keywords: ["过程组", "分组显示", "process group", "平铺", "实验特性"],
 	},
 	{
 		tab: "common",

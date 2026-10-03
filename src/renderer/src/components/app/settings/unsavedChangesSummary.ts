@@ -61,7 +61,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "linkOpenMode", tab: "common", itemKey: "settings.linkOpenMode" },
 	{ field: "workspaceContentOpenMode", tab: "common", itemKey: "settings.workspaceContentOpenMode" },
 	{ field: "expandInterimDuringStream", tab: "common", itemKey: "settings.expandInterimDuringStream" },
-	{ field: "collapsePrevRunsOnNewTurn", tab: "common", itemKey: "settings.collapsePrevRunsOnNewTurn" },
+	{ field: "processGroupDisplay", tab: "common", itemKey: "settings.processGroupDisplay" },
 	// 快捷消息不在这里：它存在独立配置文件、改完即时落盘，不属于本弹框的草案（见 QuickMessagesSetting）
 	{ field: "idleAgentAutoRelease", tab: "common", itemKey: "settings.idleAgentAutoRelease" },
 	{ field: "idleAgentKeepCount", tab: "common", itemKey: "settings.idleAgentKeepCount" },
@@ -70,6 +70,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "askNotificationEnabled", tab: "notification", itemKey: "settings.askNotification" },
 	{ field: "agentCountReminderEnabled", tab: "notification", itemKey: "settings.agentCountReminder" },
 	{ field: "announcementNotificationEnabled", tab: "notification", itemKey: "settings.announcementNotification" },
+	{ field: "toastDurationMs", tab: "notification", itemKey: "settings.toastDuration" },
 	{ field: "startupWindowMode", tab: "common", itemKey: "settings.startupWindowMode" },
 	{ field: "closeToTray", tab: "common", itemKey: "settings.closeToTray" },
 	{ field: "singleInstance", tab: "common", itemKey: "settings.singleInstance" },
@@ -94,6 +95,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "chatContentWidthPct", tab: "appearance", itemKey: "settings.contentWidthPct" },
 	{ field: "contextSpendAnimation", tab: "appearance", itemKey: "settings.contextSpendAnimation" },
 	{ field: "contentMaxWidth", tab: "appearance", itemKey: "settings.contentWidthPct" },
+	{ field: "navigationMode", tab: "appearance", itemKey: "settings.navigationMode" },
 	{ field: "sessionTabMaxWidth", tab: "appearance", itemKey: "settings.sessionTabMaxWidth" },
 	{ field: "useNativeTitleBar", tab: "appearance", itemKey: "settings.nativeTitleBar" },
 	{ field: "showNativeMenu", tab: "appearance", itemKey: "settings.nativeMenu" },
@@ -147,6 +149,7 @@ const FIELD_CATALOG: readonly FieldCatalogEntry[] = [
 	{ field: "webServiceEnabled", tab: "web", itemKey: "settings.enableWebService" },
 	{ field: "webServiceHost", tab: "web", itemKey: "settings.webServiceHost" },
 	{ field: "webServicePort", tab: "web", itemKey: "settings.webServicePort" },
+	{ field: "webServiceRequiresAuth", tab: "web", itemKey: "settings.webUseTokenAuth" },
 	{ field: "externalEditors", tab: "editors", itemKey: "settings.sectionEditors" },
 	// Git 区块原在常用设置，随独立 tab 挪到「开发者」簇（web/editors 之后、dev 之前）
 	{ field: "enableGitManagement", tab: "git", itemKey: "settings.gitManagement" },

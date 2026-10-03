@@ -5,7 +5,6 @@ import { TipTapComposer } from "./composer";
 import { SessionReferenceModal } from "../app/SessionReferenceModal";
 import { t } from "../../i18n";
 import { useSessionComposerController } from "../../hooks/useSessionComposerController";
-import { useSessionPreferenceController } from "../../hooks/useSessionPreferenceController";
 import { ComposerAttachmentBar, ComposerSendControls, SessionDeliveryNotice } from "./ComposerPanels";
 import { ComposerPickerHost } from "./ComposerPickerHost";
 import { SecurityControl } from "./SecurityControl";
@@ -18,9 +17,15 @@ import { COMPOSER_TEXT_MAX_HEIGHT } from "../../rendererUtils";
 import { chatContentWidthStyle } from "./chatContentWidth";
 import { ComposerStatsLine } from "./ComposerStatsLine";
 import { ComposerWidgetLayoutProvider, type ComposerWidgetCollapsedByKey, useComposerWidgetLayoutValue } from "./ComposerWidgetLayout";
-import type { GitBranchInfo } from "../../../../shared/types";
+import type { ChatMessage, GitBranchInfo } from "../../../../shared/types";
+import type { ReplyActionRule } from "../../../../shared/types/replyActions";
 import type { EnqueuePromptSnapshot } from "../../hooks/useSessionSend";
 import { VoiceTranscriptionControls } from "./VoiceTranscriptionControls";
+import { SessionReplyActions } from "./SessionReplyActions";
+import { BridgeWidgetSlot } from "../bridge/BridgeSlot";
+
+/** 无规则时的稳定空数组（避免每渲染新引用让下游 memo 失效）。 */
+const EMPTY_REPLY_RULES: readonly ReplyActionRule[] = [];
 
 export type ComposerAreaProps = {
 	sessionId: string;
@@ -29,6 +34,12 @@ export type ComposerAreaProps = {
 	onSwitchBranch?: (branch: string) => void;
 	/** 输入框上方独立卡（todo / goal）；放在 widgets 槽位。 */
 	widgets?: ReactNode;
+	/** 回复尾部动作仍复用本栏发送 owner；只把 UI 投到时间线内的落点。 */
+	replyActionMessages?: readonly ChatMessage[];
+	/** 声明式规则（userData/reply-actions.json 快照），由 SessionView 注入以保持单点加载。 */
+	replyActionRules?: readonly ReplyActionRule[];
+	replyActionsTarget?: HTMLDivElement | null;
+	replyActionsBlocked?: boolean;
 	/** 排队消息独立卡（与 todo/goal 同列同宽，不贴输入框、不右浮）。 */
 	queuePanel?: ReactNode;
 	enqueue?: (sessionId: string, snapshot: EnqueuePromptSnapshot) => boolean;
@@ -57,11 +68,14 @@ type ComposerExtrasProps = {
 	composerBox: ReactNode;
 	/** 输入卡正下方 StatsLine；与输入卡同一列，不吃剩余高度。 */
 	statsLine?: ReactNode;
+	/** GUI 扩展桥：输入框上方挂件（aboveEditor）。 */
+	bridgeWidgetsAbove?: ReactNode;
+	/** GUI 扩展桥：输入框下方挂件（belowEditor）。 */
+	bridgeWidgetsBelow?: ReactNode;
 };
 
 /**
- * 输入栏固有高度：独立卡按内容撑开；父列被 max-height 卡住时整体收缩，
- * 编辑器拿到变矮后的高度并内部滚动（底栏固定行不被寄出可视区）。
+ * 输入栏固有高度：独立卡按内容撑开，列被 max-height 卡住时才内部滚动。
  * 折叠状态放在这里，是为了一次重渲染就让 footer 跟着内容变高/变矮。
  */
 function ComposerMeasuredExtras(props: ComposerExtrasProps) {
@@ -79,13 +93,22 @@ function ComposerMeasuredExtras(props: ComposerExtrasProps) {
 				    ProgressGlyph 注释），gutter 治不了，还会把卡片压窄 10px。 */}
 				<div className="flex min-h-0 min-w-0 flex-col gap-2 overflow-y-auto overscroll-contain pb-px empty:hidden">
 					{props.widgets}
+					{/* GUI 扩展桥：输入框上方挂件（aboveEditor）。无内容时该组件返回 null，不占位。 */}
+					{props.bridgeWidgetsAbove}
 					{props.queuePanel}
 					{props.deliveryNotice}
 				</div>
 				{hasAttachmentBar ? <div className="shrink-0">{props.attachmentBar}</div> : null}
-				<div className="flex min-h-0 min-w-0 flex-col">
+				<div className="flex w-full min-w-0 shrink-0 flex-col">
 					{props.composerBox}
 					{props.statsLine}
+					{/* 桥状态栏**已按产品决定退役**（2026-09，方案 ②）：输入框下方只留 PiDeck
+					    自己的统计行，桥 `setStatus` 的条目不再渲染 —— 这是决定，不是漏挂。
+					    代价：pi-tracker 用量行 / `mcp-auth` 授权进度 / plan-mode 进度等只走
+					    setStatus 的信息在 GUI 里看不见了；数据侧仍在 bridgeStatus /
+					    bridgeStatusTone 里，恢复步骤见 BridgeSlot.tsx 的退役说明。 */}
+					{/* GUI 扩展桥：输入框下方挂件（belowEditor）。无内容时不占位。 */}
+					{props.bridgeWidgetsBelow}
 				</div>
 			</>
 		</ComposerWidgetLayoutProvider>
@@ -108,25 +131,8 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 	});
 
 	const modelPendingMap = useAtomValue(modelPendingByIdAtom);
-	/** 底栏 chip 浮层是否打开：二级视图需要模型目录，用它武装目录懒加载。 */
-	const [chipPopoverOpen, setChipPopoverOpen] = useState(false);
-
-	// 模型/档位偏好链路（读侧状态 + 写侧命令）：由本组件持有并同时注入
-	// ①底栏 chip 的浮层（一级滑块 + 二级列表）与 ②选择器宿主（Ctrl+M / Ctrl+T 的 Dialog）。
-	// 两侧必须共用同一份目录/收藏/应用命令：分叉会出现「浮层改了档位、Dialog 高亮没变」
-	// 或「两处各拉一次模型目录」的浪费。pickerOpen 由当前 picker 状态驱动（目录懒加载）。
-	const preference = useSessionPreferenceController({
-		sessionId: props.sessionId,
-		pickerOpen: composer.picker === "model" || composer.picker === "thinking",
-		thinkingPickerOpen: composer.picker === "thinking",
-		defaultModel: composer.dshDefaultModel ?? composer.bootstrapDefaultModel,
-		defaultThinkingLevel: composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel,
-		// 选择器点选后关闭：快捷键循环走的也是这条路径，此时 picker 本来就是 null，幂等。
-		onApplied: composer.pickers.close,
-		// 浮层（chip 一级/二级）打开也要武装模型目录：二级视图的列表是懒加载的，
-		// 不武装就会出现「点开二级看到空列表」。
-		popoverOpen: chipPopoverOpen,
-	});
+	// pickerOpen: composer.picker === "model" || composer.picker === "thinking"
+	// popoverOpen: chipPopoverOpen
 
 	const prewarmStartedForSessionRef = useRef<string | undefined>(undefined);
 	useEffect(() => {
@@ -144,8 +150,19 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 		<ComposerRuntimeIntegrations sessionId={props.sessionId}>
 			{({ feishuIndicator }) => (
 				<>
-					{/* 固有高度：内容撑开 footer；父列 max-height 卡住时列内各段一起收缩，
-              编辑器拿到变矮后的高度并内部滚动（底栏固定行不被寄出可视区）。 */}
+					{props.replyActionMessages && (
+						<SessionReplyActions
+							sessionId={props.sessionId}
+							messages={props.replyActionMessages}
+							rules={props.replyActionRules ?? EMPTY_REPLY_RULES}
+							target={props.replyActionsTarget ?? null}
+							hidden={Boolean(props.replyActionsBlocked || composer.isBusy || composer.isStarting || composer.sendState.status === "sending" || composer.sendState.status === "unknown" || composer.mode === "imagegen" || composer.backend === "imagegen")}
+							sendDisabled={!composer.delivery.canSendQuickMessage}
+							onSend={composer.delivery.sendQuickMessage}
+						/>
+					)}
+					{/* 固有高度：内容撑开 footer；父列 max-height 卡住时独立卡内部滚动，
+              输入卡 shrink-0 始终完整可见。 */}
 					<footer ref={footerRef} className="composer flex max-h-full min-h-0 min-w-0 flex-col gap-2 overflow-hidden bg-transparent px-0 pb-2" style={composerFooterStyle()} data-session-id={props.sessionId}>
 						<ComposerMeasuredExtras
 							widgets={props.widgets ?? null}
@@ -156,14 +173,16 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 									<ComposerAttachmentBar images={composer.attachments} onPreview={composer.images.preview} onRemove={composer.images.remove} onClear={composer.images.clear} pasteFiles={composer.pasteFiles.files} onRemovePasteFile={composer.pasteFiles.remove} onClearPasteFiles={composer.pasteFiles.clear} />
 								) : null
 							}
-							statsLine={
-								<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} provider={composer.runtime?.state?.provider ?? composer.record?.model?.provider ?? composer.dshDefaultModel?.provider ?? composer.bootstrapDefaultModel?.provider} backend={composer.backend === "dsh" ? "dsh" : "pi"} />
-							}
+							statsLine={<ComposerStatsLine state={composer.runtime?.state} turnCount={props.turnCount} provider={composer.runtime?.state?.provider} backend={composer.backend === "dsh" ? "dsh" : "pi"} />}
+							// GUI 扩展桥的两个 widget 落点：全部「无内容不占位」（组件内部返回 null）。
+							// 桥状态栏（setStatus 条目）已按产品决定退役，不再有挂载点。
+							bridgeWidgetsAbove={<BridgeWidgetSlot sessionId={props.sessionId} placement="aboveEditor" />}
+							bridgeWidgetsBelow={<BridgeWidgetSlot sessionId={props.sessionId} placement="belowEditor" />}
 							composerBox={
 								<div
 									// overflow-visible：保留命令面板/建议浮层；面板 minSize 已保证底栏不被裁切
 									className={[
-										"composer-box relative flex min-h-0 min-w-0 flex-col overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
+										"composer-box relative flex min-h-0 min-w-0 flex-col w-full overflow-visible rounded-[20px] border border-border bg-card text-card-foreground shadow-[var(--shadow-composer-lifted)] transition-[border-color,box-shadow,background-color]",
 										composer.bangMode === "bang-bang" ? "shell-silent-mode" : composer.bangMode === "bang" ? "shell-mode" : composer.mode === "plan" ? "plan-mode" : composer.mode === "goal" ? "goal-mode" : "",
 									]
 										.filter(Boolean)
@@ -232,6 +251,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 										record={composer.record}
 										defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
 										defaultThinkingLevel={composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel}
+										modelThinkingLevels={composer.bootstrapModelThinkingLevels}
 										backend={composer.backend}
 										onChangeBackend={composer.changeBackend}
 										feishuIndicator={feishuIndicator}
@@ -244,30 +264,13 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 											   sessionId 供全局快捷键（Ctrl/Cmd+Shift+M）按聚焦栏去重时使用。 */
 											<QuickMessageMenu sessionId={props.sessionId} disabled={composer.isStarting} sendDisabled={!composer.delivery.canSendQuickMessage} onInsert={composer.pickers.insertQuickMessage} onSend={composer.delivery.sendQuickMessage} />
 										}
-										onPickThinking={(effort) => void preference.applyThinking(effort)}
-										currentEffort={preference.currentThinkingLevel}
-										thinkingLevels={preference.thinkingLevels}
-										modelPickerSource={{
-											models: preference.models,
-											report: preference.report,
-											loading: preference.catalogLoading,
-											refreshing: preference.refreshing,
-											onRefresh: () => preference.reloadCatalog(true),
-											current: preference.currentModel,
-											favoriteModels: preference.favoriteModels,
-											onToggleFavorite: (provider: string, modelId: string) => void preference.toggleFavorite(provider, modelId),
-											recentProviders: preference.recentProviders,
-											providerOrder: preference.isDshSession ? preference.dshProviderOrder : preference.providerOrder,
-											hiddenProviders: preference.hiddenProviders,
-											hiddenModels: preference.hiddenModels,
-											onToggleHideModel: (provider: string, modelId: string) => void preference.toggleHideModel(provider, modelId),
-											backend: preference.isDshSession ? "dsh" : "pi",
-										}}
-										onPickModel={(model) => void preference.applyModel(model)}
-										onModelPopoverOpenChange={setChipPopoverOpen}
+										onPickModel={() => composer.pickers.open("model")}
+										onPickThinking={() => composer.pickers.open("thinking")}
 										onPickPromptTemplate={() => composer.pickers.open("template")}
 										onPickSkill={() => composer.pickers.open("skill")}
 										onCompact={composer.delivery.compact}
+										overflowRecoveryTarget={composer.delivery.overflowRecoveryTarget}
+										onOverflowRecovery={composer.delivery.onOverflowRecovery}
 										onChangeMode={composer.pickers.setMode}
 										imageGenLocked={composer.delivery.imageGenModeLocked}
 										onCancelPlan={() => composer.pickers.setMode("normal")}
@@ -289,18 +292,34 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 												: undefined
 										}
 										voiceControls={
-											// 未配置必需参数（baseUrl+model+apiKey）时整个录音入口隐藏
-											composer.voice.configured ? <VoiceTranscriptionControls state={composer.voice.state} disabled={composer.isStarting} onStart={() => void composer.voice.start()} onStop={composer.voice.stop} onCancel={composer.voice.cancel} /> : undefined
+											// 总开关开启即显示录音入口；引擎未就绪时点击才提示去设置补全（见 useVoiceTranscription.start）
+											composer.voice.configured ? (
+												<VoiceTranscriptionControls state={composer.voice.state} busy={composer.voice.transcribingBusy} readLevel={composer.voice.readLevel} disabled={composer.isStarting} onStart={() => void composer.voice.start()} onStop={composer.voice.stop} onCancel={composer.voice.cancel} />
+											) : undefined
 										}
-										sendControls={<ComposerSendControls isAgentBusy={composer.isBusy} isAgentStarting={composer.isStarting} hasContent={composer.hasContent} canSend={composer.delivery.canSend} isGeneratingImage={composer.delivery.generatingImage} onSend={composer.delivery.send} onStop={composer.delivery.abort} />}
+										sendControls={
+											<ComposerSendControls
+												isAgentBusy={composer.isBusy}
+												isAgentStarting={composer.isStarting}
+												hasContent={composer.hasContent}
+												canSend={composer.delivery.canSend}
+												isGeneratingImage={composer.delivery.generatingImage}
+												onSend={composer.delivery.send}
+												onStop={composer.delivery.abort}
+												onSendSteer={composer.delivery.sendSteer}
+												onSendFollowUp={composer.delivery.sendFollowUp}
+												onSendParallel={composer.delivery.sendParallel}
+												canSendParallel={composer.delivery.canSendParallel}
+											/>
+										}
 									/>
+									{/* GUI 扩展桥：输入框工具栏落点已禁用（扩展在此区域渲染文本会造成 UI 干扰） */}
 								</div>
 							}
 						/>
 					</footer>
 					<ComposerPickerHost
 						sessionId={props.sessionId}
-						preference={preference}
 						picker={composer.picker}
 						templates={composer.templates}
 						onClose={composer.pickers.close}
@@ -310,6 +329,7 @@ export const ComposerArea = forwardRef<HTMLElement, ComposerAreaProps>(function 
 						onInsertSkillContent={composer.pickers.insertSkillContent}
 						defaultModel={composer.dshDefaultModel ?? composer.bootstrapDefaultModel}
 						defaultThinkingLevel={composer.dshDefaultThinkingLevel ?? composer.bootstrapDefaultThinkingLevel}
+						modelThinkingLevels={composer.bootstrapModelThinkingLevels}
 					/>
 					{composer.previewImage ? <ImagePreviewModal image={composer.previewImage} onClose={composer.modals.closePreview} /> : null}
 					{composer.sessionReference ? (

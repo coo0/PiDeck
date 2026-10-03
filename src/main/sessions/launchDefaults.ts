@@ -29,10 +29,29 @@ export function resolveLaunchDefaultOptions(input: {
 		// enabledModels/lastUsed 只用于旧链路兼容，不参与无会话默认回退。
 		const model = welcomeModelOfModelsConfig(input.model, models) ?? welcomeModelOfModelsConfig(input.welcomeModel, models) ?? explicit ?? firstModelOfModelsConfig(models);
 		if (model) defaults.model = model;
+		const modelThinkingLevels = parseThinkingLevelMap(input.settings);
+		if (modelThinkingLevels) defaults.modelThinkingLevels = modelThinkingLevels;
 	}
-	const thinkingLevel = nonBlankString(input.settings, "defaultThinkingLevel") ?? firstThinkingLevel(input.capabilities, defaults.model);
+	const thinkingLevel = (input.backend !== "dsh" && defaults.model ? modelThinkingLevelFor(input.settings, defaults.model.provider, defaults.model.modelId) : undefined) ?? nonBlankString(input.settings, "defaultThinkingLevel") ?? firstThinkingLevel(input.capabilities, defaults.model);
 	if (thinkingLevel) defaults.thinkingLevel = thinkingLevel;
 	return defaults;
+}
+
+function modelThinkingLevelFor(settings: unknown, provider: string | undefined, modelId: string | undefined): string | undefined {
+	if (!provider || !modelId || typeof settings !== "object" || settings === null || Array.isArray(settings)) return undefined;
+	const map = (settings as { modelThinkingLevels?: unknown }).modelThinkingLevels;
+	if (typeof map !== "object" || map === null || Array.isArray(map)) return undefined;
+	const value = (map as Record<string, unknown>)[`${provider}/${modelId}`];
+	return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function parseThinkingLevelMap(settings: unknown): Record<string, string> | undefined {
+	if (typeof settings !== "object" || settings === null || Array.isArray(settings)) return undefined;
+	const raw = (settings as { modelThinkingLevels?: unknown }).modelThinkingLevels;
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+	const result: Record<string, string> = {};
+	for (const [key, value] of Object.entries(raw)) if (key && typeof value === "string" && value.trim()) result[key] = value.trim();
+	return Object.keys(result).length > 0 ? result : undefined;
 }
 
 /**

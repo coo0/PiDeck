@@ -9,10 +9,11 @@ import { getHeaderValue, setHeaderValue } from "./providerHeaders";
 import { buildModelsFromFetchedSelection } from "./modelsUtils";
 // 排序键收敛到 shared：与模型下拉列表 / 主进程写入保持同一顺序。
 import { compareModelRows } from "../../../shared/modelOrder";
-import { countSelectedModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
+import { countSelectedModelIndexes, invertModelIndexes, selectAllModelIndexes, toggleAllModelIndexes, toggleModelIndex } from "./modelBatchSelection";
 import { FetchedModelCombobox } from "./FetchedModelCombobox";
 import { Checkbox } from "../components/ui-shadcn/checkbox";
 import { Label } from "../components/ui-shadcn/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui-shadcn/select";
 import { showNotice } from "../utils/notice";
 import { applyModelPatches, computeModelSpecPatches, looksDeepSeekBacked } from "../utils/modelSpecAutoFill";
 import type { FetchedModel, ConfigProxyMode } from "../../../shared/types/fetchedModel";
@@ -27,6 +28,10 @@ import { splitVisibleAndHiddenProviders } from "./providerVisibility";
 import { applyProviderOrder } from "../utils/providerOrder";
 import { useProviderReorder } from "../hooks/useProviderReorder";
 import { ModelsTable } from "./ModelsTable";
+import { ModelsExportPanel } from "./ModelsExportPanel";
+import { ModelsImportPanel } from "./ModelsImportPanel";
+import { useAvailableThinkingLevels } from "./useAvailableThinkingLevels";
+import { modelThinkingLevelsKey } from "../../../shared/modelThinkingLevels";
 import type { MutableRefObject } from "react";
 
 /** 把现有 provider 配置转成编辑弹窗的预填值（名字/字段/模型列表）。 */
@@ -112,6 +117,10 @@ export function ModelsTab(props: {
 	onUpdateModelUserAgent?: (providerName: string, index: number, value: string) => void;
 	/** 读取某模型当前的 UA 覆盖值（可选；与上一个回调成对出现才渲染操作列的 UA 按钮）。 */
 	getModelUserAgentOverride?: (providerName: string, index: number) => string;
+	/** 每模型默认思考档位（settings.json 的 modelThinkingLevels），可选：成对出现才渲染编辑入口。 */
+	onUpdateModelThinkingLevelDefault?: (providerName: string, index: number, value: string) => void;
+	/** 读取某模型当前的默认思考档位（空串 = 跟随全局设置）。 */
+	getModelThinkingLevelDefault?: (providerName: string, index: number) => string;
 	onDeleteModel: (providerName: string, index: number) => void;
 	onDeleteModels: (providerName: string, indexes: number[]) => void;
 	/** 重置为自适应：显式刷新 endpoint /models 后按模板清空并重填能力字段。 */
@@ -123,10 +132,15 @@ export function ModelsTab(props: {
 	onChangeTestModelId: (providerName: string, modelId: string) => void;
 	onChangeTestProxyMode: (providerName: string, mode: ConfigProxyMode) => void;
 	onClearTestResult: () => void;
+	/** 导入面板把合并结果写回未保存草稿（父级 ConfigModal 处理，不直接落盘）。 */
+	onApplyModelsTransfer: (next: ModelsFile) => void;
 	onSave: () => void;
 	onChangeProvider: (name: string, field: string, value: unknown) => void;
 }) {
 	const { data, expandedProvider, saving } = props;
+	// Pi 已确认的可用思考档位目录（只读事实）：每模型默认档位的编辑入口据此给选项/禁用，
+	// 与欢迎页/会话内选择器同源（capability snapshot）。
+	const availableThinkingLevels = useAvailableThinkingLevels();
 	const providerNames = Object.keys(data.providers);
 	// 隐藏开关：主列表只显示未隐藏项，隐藏项进页面底部「已隐藏」折叠区（设置页隐藏开关）
 	// 自定义排序只作用于展示：先按用户拖拽/上移下移结果重排完整列表，再切分可见/隐藏。
@@ -167,6 +181,25 @@ export function ModelsTab(props: {
 	const [showGuide, setShowGuide] = useState(false);
 	const [batchMode, setBatchMode] = useState(false);
 	const [selectedProviders, setSelectedProviders] = useState<Set<string>>(() => new Set());
+	// 批量模式当前动作；null = 未选择（进入批量管理时不预选，强制用户显式选择）
+	const [batchAction, setBatchAction] = useState<"delete" | "export" | null>(null);
+	// 批量导出：非空时列表区被面板独占（与 AddProviderDialog 同一模式）。
+	const [transferView, setTransferView] = useState<{ kind: "export"; ids: string[] } | { kind: "import" } | null>(null);
+	const exitBatchMode = () => {
+		setBatchMode(false);
+		setSelectedProviders(new Set());
+		setBatchAction(null);
+	};
+	const handleBatchExecute = () => {
+		if (!batchAction || selectedProviders.size === 0) return;
+		if (batchAction === "delete") {
+			// 确认弹窗由 ConfigModal.handleDeleteProviders 承载（common.deleteBatchConfirm），此处只发起
+			props.onDeleteProviders([...selectedProviders]);
+		} else {
+			setTransferView({ kind: "export", ids: [...selectedProviders] });
+		}
+		exitBatchMode();
+	};
 	// 模型批量删除只作用于当前展开的 provider，避免不同 provider 的同一行索引互相污染。
 	const [modelBatchProvider, setModelBatchProvider] = useState<string | null>(null);
 	const [selectedModelIndexes, setSelectedModelIndexes] = useState<Set<number>>(() => new Set());
@@ -249,47 +282,52 @@ export function ModelsTab(props: {
 	return (
 		<div>
 			{/* 列表态：顶部按钮 + 指南 + 卡片列表；新增/编辑时整区切换为配置表单页（非弹窗） */}
-			{!props.addingProvider && !props.editingProvider && (
+			{!props.addingProvider && !props.editingProvider && !transferView && (
 				<>
 					<div className="mb-3 flex items-center justify-between gap-3">
 						<span className="font-mono text-xs tabular-nums text-text-tertiary">{t("config.count.providers", { count: visibleProviderNames.length })}</span>
 						<div className="flex min-w-0 items-center gap-1.5">
-							<Button size="sm" variant="outline" onClick={props.onStartAddProvider} disabled={saving}>
-								{t("config.addProvider")}
-							</Button>
-							<Button size="sm" variant="outline" onClick={() => setShowGuide(!showGuide)} disabled={saving}>
-								{t("config.providerGuide")}
-							</Button>
-							<Button
-								size="sm"
-								variant="destructive"
-								onClick={() => {
-									if (batchMode) {
-										setBatchMode(false);
-										setSelectedProviders(new Set());
-									} else {
-										setBatchMode(true);
-									}
-								}}
-								disabled={saving || visibleProviderNames.length === 0}
-							>
-								{batchMode ? t("common.cancel") : t("common.deleteBatch")}
+							{!batchMode && (
+								<>
+									<Button size="sm" variant="outline" onClick={props.onStartAddProvider} disabled={saving}>
+										{t("config.addProvider")}
+									</Button>
+									<Button size="sm" variant="outline" onClick={() => setTransferView({ kind: "import" })} disabled={saving}>
+										{t("config.models.transfer.importButton")}
+									</Button>
+									<Button size="sm" variant="outline" onClick={() => setShowGuide(!showGuide)} disabled={saving}>
+										{t("config.providerGuide")}
+									</Button>
+								</>
+							)}
+							<Button size="sm" variant="outline" onClick={() => (batchMode ? exitBatchMode() : setBatchMode(true))} disabled={saving || visibleProviderNames.length === 0}>
+								{batchMode ? t("common.cancel") : t("common.batchManage")}
 							</Button>
 							{batchMode && (
-								<Button
-									size="sm"
-									variant="destructive"
-									onClick={() => {
-										if (selectedProviders.size > 0) {
-											props.onDeleteProviders([...selectedProviders]);
-											setSelectedProviders(new Set());
-											setBatchMode(false);
-										}
-									}}
-									disabled={selectedProviders.size === 0}
-								>
-									{t("common.deleteSelected")} ({selectedProviders.size})
-								</Button>
+								<>
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set(visibleProviderNames))}>
+										{t("common.selectAll")}
+									</Button>
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set(visibleProviderNames.filter((name) => !selectedProviders.has(name))))}>
+										{t("common.invertSelection")}
+									</Button>
+									{/* 清除选择只清空勾选，留在批量模式（不动 batchAction） */}
+									<Button size="sm" variant="ghost" disabled={visibleProviderNames.length === 0} onClick={() => setSelectedProviders(new Set())}>
+										{t("common.clearSelection")}
+									</Button>
+									<Select value={batchAction ?? undefined} onValueChange={(next) => setBatchAction(next === "delete" || next === "export" ? next : null)}>
+										<SelectTrigger aria-label={t("config.models.batchActionLabel")} className="h-8 w-32">
+											<SelectValue placeholder={t("config.models.batchActionLabel")} />
+										</SelectTrigger>
+										<SelectContent position="popper">
+											<SelectItem value="delete">{t("config.models.batchAction.delete")}</SelectItem>
+											<SelectItem value="export">{t("config.models.batchAction.export")}</SelectItem>
+										</SelectContent>
+									</Select>
+									<Button size="sm" variant="outline" disabled={!batchAction || selectedProviders.size === 0} onClick={handleBatchExecute}>
+										{t("config.models.batchExecute")}
+									</Button>
+								</>
 							)}
 						</div>
 					</div>
@@ -622,19 +660,31 @@ export function ModelsTab(props: {
 															{isModelBatchMode ? t("common.cancel") : t("common.deleteBatch")}
 														</Button>
 														{isModelBatchMode && (
-															<Button
-																variant="destructive"
-																size="sm"
-																onClick={() => {
-																	if (selectedModelCount === 0) return;
-																	props.onDeleteModels(name, [...selectedModelIndexes]);
-																	clearModelBatch();
-																}}
-																disabled={selectedModelCount === 0}
-															>
-																<Trash2 className="size-3.5" aria-hidden="true" />
-																{t("common.deleteSelected")} ({selectedModelCount})
-															</Button>
+															<>
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(selectAllModelIndexes(provider.models.length))}>
+																	{t("common.selectAll")}
+																</Button>
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(invertModelIndexes(selectedModelIndexes, provider.models.length))}>
+																	{t("common.invertSelection")}
+																</Button>
+																{/* 清除选择只清空勾选，留在批量模式（不动 modelBatchProvider） */}
+																<Button size="sm" variant="ghost" disabled={provider.models.length === 0} onClick={() => setSelectedModelIndexes(new Set())}>
+																	{t("common.clearSelection")}
+																</Button>
+																<Button
+																	variant="destructive"
+																	size="sm"
+																	onClick={() => {
+																		if (selectedModelCount === 0) return;
+																		props.onDeleteModels(name, [...selectedModelIndexes]);
+																		clearModelBatch();
+																	}}
+																	disabled={selectedModelCount === 0}
+																>
+																	<Trash2 className="size-3.5" aria-hidden="true" />
+																	{t("common.deleteSelected")} ({selectedModelCount})
+																</Button>
+															</>
 														)}
 													</div>
 												</div>
@@ -686,6 +736,14 @@ export function ModelsTab(props: {
 													onUpdateModelThinkingLevel={(i, key, value) => props.onUpdateModelThinkingLevel(name, i, key, value)}
 													onUpdateModelUserAgent={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i, value) => props.onUpdateModelUserAgent!(name, i, value) : undefined}
 													getModelUserAgentOverride={props.onUpdateModelUserAgent && props.getModelUserAgentOverride ? (i) => props.getModelUserAgentOverride!(name, i) : undefined}
+													onUpdateModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i, value) => props.onUpdateModelThinkingLevelDefault!(name, i, value) : undefined}
+													getModelThinkingLevelDefault={props.onUpdateModelThinkingLevelDefault && props.getModelThinkingLevelDefault ? (i) => props.getModelThinkingLevelDefault!(name, i) : undefined}
+													getModelAvailableThinkingLevels={(i) => {
+														// 键为空（未填 id 的新行）时查不到 → 未知，与「未识别模型」同一展示。
+														const model = provider.models[i];
+														if (!model?.id) return undefined;
+														return availableThinkingLevels.get(modelThinkingLevelsKey(name, model.id));
+													}}
 													onDeleteModel={(i) => {
 														clearModelBatch();
 														props.onDeleteModel(name, i);
@@ -794,6 +852,9 @@ export function ModelsTab(props: {
 					}}
 				/>
 			)}
+
+			{transferView?.kind === "export" && <ModelsExportPanel providerIds={transferView.ids} providers={props.data.providers} onBack={() => setTransferView(null)} />}
+			{transferView?.kind === "import" && <ModelsImportPanel data={props.data} onApply={props.onApplyModelsTransfer} onBack={() => setTransferView(null)} />}
 		</div>
 	);
 }

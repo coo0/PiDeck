@@ -1,4 +1,4 @@
-import type { AgentUiBatchQuestion, AgentUiRequest, AgentUiResponse } from "../../../shared/types";
+import type { AgentUiBatchQuestion, AgentUiRequest, AgentUiResponse, ChatMessage } from "../../../shared/types";
 
 /**
  * Ask 提问 UI 的纯逻辑（与渲染解耦，便于单测与 E2E 断言）。
@@ -196,6 +196,129 @@ export function parseSecurityConfirmTitle(title: string): SecurityConfirmInfo | 
  */
 export function formatSecurityConfirmSummary(info: SecurityConfirmInfo): string {
 	return info.tool ? `安全确认：${info.tool}` : "安全确认";
+}
+
+/**
+ * DSH 已作答回显（纯数据投影）。
+ *
+ * 背景：pi 的 ask 是 ask_question 工具调用，收口时主进程把问答写进工具消息
+ * meta._askCard，时间线留下静态卡；DSH 的审批/提问是带外 server-request，
+ * completed 事件不带答案值，应答后卡片直接消失（用户反馈「dsh 提交后的渲染没有做」）。
+ * 渲染层在 responder 应答 accepted 时用本函数把「请求 + 用户答案」投影成静态回显，
+ * 再经 injectAskEchoMessage 合成为 ask_question 工具消息插入时间线的应答位置
+ * （与 pi 的 meta._askCard 同一渲染路径），不落盘（DSH 历史由 host 折叠，
+ * 写进缓存的合成消息会被下次全量投影冲掉，所以只在渲染派生层注入）。
+ */
+export type AskEchoItem = {
+	question: string;
+	answer: BatchAnswerValue;
+	answered: boolean;
+};
+
+export type AskEcho = {
+	requestId: string;
+	/** 整单取消：标题显示「已取消」 */
+	cancelled: boolean;
+	items: AskEchoItem[];
+};
+
+/** batch 提交信封：serializeBatchAnswers 产出的 JSON（回显侧解码）。 */
+type BatchAnswerEnvelopeItem = { id?: unknown; value?: unknown; label?: unknown };
+
+function decodeBatchEnvelope(value: unknown): BatchAnswerEnvelopeItem[] | undefined {
+	if (typeof value !== "string") return undefined;
+	try {
+		const parsed = JSON.parse(value) as { answers?: unknown };
+		return Array.isArray(parsed?.answers) ? (parsed.answers as BatchAnswerEnvelopeItem[]) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * 把一次已接受的应答投影为回显数据；非 ask 方法或无法解读时返回 undefined（不显示回显）。
+ * - batch_ask：用 batchQuestions 逐题配对信封答案（信封解码失败退回整串原文）；
+ * - confirm：答案取 confirmed；select/input/editor：取 value；
+ * - 取消：列出原题、answered=false（与 pi _askCard 的取消语义一致）。
+ */
+export function buildAskEcho(request: AgentUiRequest, response: AgentUiResponse): AskEcho | undefined {
+	if (!["select", "confirm", "input", "editor", "batch_ask"].includes(request.method)) return undefined;
+	const cancelled = Boolean(response.cancelled);
+	const batchQuestions = request.batchQuestions ?? [];
+	if (request.method === "batch_ask" && batchQuestions.length > 0) {
+		const envelope = decodeBatchEnvelope(response.value);
+		const items: AskEchoItem[] = batchQuestions.map((question) => {
+			const answerItem = envelope?.find((entry) => entry?.id === question.id);
+			const raw = answerItem?.value;
+			const value: BatchAnswerValue = typeof raw === "string" || typeof raw === "boolean" || Array.isArray(raw) ? raw : null;
+			const label = typeof answerItem?.label === "string" ? answerItem.label : undefined;
+			return { question: formatAskTitle(question.question), answer: label ?? value, answered: !cancelled && value !== null };
+		});
+		if (!envelope && !cancelled && typeof response.value === "string") {
+			items.push({ question: formatAskTitle(request.title || ""), answer: response.value, answered: true });
+		}
+		return { requestId: request.requestId, cancelled, items };
+	}
+	const question = formatAskTitle(request.title || "");
+	if (request.method === "confirm") {
+		return { requestId: request.requestId, cancelled, items: [{ question, answer: cancelled ? null : Boolean(response.confirmed), answered: !cancelled }] };
+	}
+	return { requestId: request.requestId, cancelled, items: [{ question, answer: cancelled ? null : (response.value ?? null), answered: !cancelled }] };
+}
+
+/** 回显内联注入参数：应答时刻的快照（锚点 + 时间戳），由 ask-echo-atoms 记录。 */
+export type AskEchoPlacement = {
+	echo: AskEcho;
+	agentId: string;
+	/** 应答时刻时间线最后一条消息 id：回显合成消息插在其后（= 提问阻塞的工具调用位置） */
+	anchorMessageId?: string;
+	answeredAt: number;
+};
+
+/**
+ * 把回显投影为 pi 同款的 ask_question 工具消息（meta._askCard 走 ToolCallCard 的
+ * isAskCard 分支：行头「提问」+「已回答」徽标，展开区逐题列问答）。
+ * 批量时 questions 数组给展开列表，顶层 question/answered 供行头与徽标。
+ */
+export function askEchoToolMessage(placement: AskEchoPlacement): ChatMessage {
+	const items = placement.echo.items;
+	const questionCards = items.map((item) => ({
+		question: item.question,
+		answered: item.answered,
+		...(item.answer === null || item.answer === undefined ? {} : { answer: item.answer }),
+	}));
+	const askCard = {
+		...(questionCards[0] ?? {}),
+		answered: !placement.echo.cancelled && items.some((item) => item.answered),
+		...(questionCards.length > 1 ? { questions: questionCards } : {}),
+	};
+	return {
+		id: `dsh-ask-echo:${placement.echo.requestId}`,
+		agentId: placement.agentId,
+		role: "tool",
+		text: "",
+		timestamp: placement.answeredAt,
+		meta: { toolName: "ask_question", status: "done", _askCard: askCard },
+	};
+}
+
+/**
+ * 在派生消息列表中按锚点内联插入回显工具消息（不改动入参数组）。
+ * - 锚点缺失（应答时会话还没有消息）：插到列表头部（提问先于一切投影内容）；
+ * - 锚点找不到（历史被压缩/host 重投影改写）：放弃注入——错位的回显比没有更糟；
+ * - 已存在同 id（防重）：原样返回。
+ */
+export function injectAskEchoMessage(messages: ChatMessage[], placement: AskEchoPlacement | undefined): ChatMessage[] {
+	if (!placement) return messages;
+	const echoId = `dsh-ask-echo:${placement.echo.requestId}`;
+	if (messages.some((message) => message.id === echoId)) return messages;
+	const synthetic = askEchoToolMessage(placement);
+	if (!placement.anchorMessageId) return [synthetic, ...messages];
+	const anchorIndex = messages.findIndex((message) => message.id === placement.anchorMessageId);
+	if (anchorIndex < 0) return messages;
+	const next = messages.slice();
+	next.splice(anchorIndex + 1, 0, synthetic);
+	return next;
 }
 
 /**

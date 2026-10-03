@@ -19,6 +19,9 @@ const { MAC_MANUAL_LATEST_RELEASE_URL, createMacManualUpdateChecker, parseGitHub
 	},
 });
 
+// dev 通道 releases 列表 URL 与 ChannelSwitchService 同源（GITHUB_RELEASES_API）；单独加载取常量做断言。
+const { GITHUB_RELEASES_API } = loadTsCommonJs("src/main/update/ChannelSwitchService.ts");
+
 test("parseGitHubReleaseVersion accepts a redirected latest-release tag only", () => {
 	assert.equal(parseGitHubReleaseVersion("https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4"), "0.7.4");
 	assert.equal(parseGitHubReleaseVersion("https://github.com/ayuayue/PiDeck/releases/tag/0.7.4-beta.1"), "0.7.4-beta.1");
@@ -34,13 +37,13 @@ test("parseLatestReleaseTagFromJson reads AtomGit / GitHub REST tag_name", () =>
 	assert.equal(parseLatestReleaseTagFromJson(JSON.stringify({ name: "v0.7.6" })), null);
 });
 
-test("resolveLatestReleaseVersion prefers JSON tag_name and falls back to a legacy GitHub tag URL", () => {
+test("resolveLatestReleaseVersion prefers the final tag URL and falls back to JSON", () => {
 	assert.equal(
 		resolveLatestReleaseVersion({
 			url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
 			body: JSON.stringify({ tag_name: "v0.7.6" }),
 		}),
-		"0.7.6",
+		"0.7.4",
 	);
 	assert.equal(
 		resolveLatestReleaseVersion({
@@ -89,7 +92,7 @@ test("manual macOS checker default fetcher reads the latest release JSON", async
 	assert.equal(result.hasUpdate, true);
 });
 
-test("manual macOS checker requests the GitHub Releases API and detects beta -> stable", async () => {
+test("manual macOS checker requests the GitHub webpage redirect and detects beta -> stable", async () => {
 	let requestedUrl = "";
 	const check = createMacManualUpdateChecker({
 		fetchLatestRelease: async (url) => {
@@ -97,15 +100,14 @@ test("manual macOS checker requests the GitHub Releases API and detects beta -> 
 			return {
 				ok: true,
 				status: 200,
-				url,
-				body: JSON.stringify({ tag_name: "v0.7.4" }),
+				url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
 			};
 		},
 	});
 
 	const result = await check("0.7.3-beta");
 	assert.equal(requestedUrl, MAC_MANUAL_LATEST_RELEASE_URL);
-	assert.match(requestedUrl, /^https:\/\/api\.github\.com\/repos\/coo0\/PiDeck\/releases\/latest$/);
+	assert.equal(requestedUrl, "https://github.com/coo0/PiDeck/releases/latest");
 	assert.equal(result.latestVersion, "0.7.4");
 	assert.equal(result.hasUpdate, true);
 });
@@ -166,4 +168,83 @@ test("manual macOS checker rejects missing tag_name and non-2xx responses", asyn
 		fetchLatestRelease: async () => ({ ok: true, status: 200, url: MAC_MANUAL_LATEST_RELEASE_URL, body: "" }),
 	});
 	await assert.rejects(() => empty("0.7.3"), /did not resolve/);
+});
+
+test("manual macOS default fetcher uses the final HTML URL without reading the body", async () => {
+	defaultFetchResponse = {
+		ok: true,
+		status: 200,
+		url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.7.4",
+		headers: { get: () => "text/html" },
+		text: async () => {
+			throw new Error("HTML body must not be read");
+		},
+	};
+	const result = await createMacManualUpdateChecker()("0.7.3-beta.1");
+	assert.equal(defaultFetchRequest[0], MAC_MANUAL_LATEST_RELEASE_URL);
+	assert.equal(defaultFetchRequest[1].redirect, "follow");
+	assert.equal(result.latestVersion, "0.7.4");
+	assert.equal(result.hasUpdate, true);
+});
+
+test("manual macOS checker rejects network failure and invalid JSON values", async () => {
+	const offline = createMacManualUpdateChecker({
+		fetchLatestRelease: async () => {
+			throw new Error("offline");
+		},
+	});
+	await assert.rejects(() => offline("0.7.3"), /offline/);
+	for (const body of ["{", "null", "[]", '{"tag_name":42}', '{"tag_name":" "}']) {
+		assert.equal(resolveLatestReleaseVersion({ url: "not a URL", body }), null);
+	}
+	assert.equal(shouldReadJsonBody("not a URL", "text/html"), false);
+});
+
+test("dev channel picks the newest prerelease from the releases list without the /latest redirect", async () => {
+	const requestedUrls = [];
+	const check = createMacManualUpdateChecker({
+		channel: "dev",
+		platform: "darwin",
+		arch: "arm64",
+		fetchReleases: async (url) => {
+			requestedUrls.push(url);
+			return {
+				ok: true,
+				status: 200,
+				body: JSON.stringify([
+					{ tag_name: "v0.7.4", prerelease: false, assets: [{ name: "PiDeck-0.7.4-arm64.dmg", browser_download_url: "https://github.com/ayuayue/PiDeck/releases/download/v0.7.4/x.dmg" }] },
+					{ tag_name: "v0.8.0-beta.1", prerelease: true, assets: [{ name: "PiDeck-0.8.0-beta.1-arm64.dmg", browser_download_url: "https://github.com/ayuayue/PiDeck/releases/download/v0.8.0-beta.1/x.dmg" }] },
+					{
+						tag_name: "v0.8.0-beta.2",
+						prerelease: true,
+						html_url: "https://github.com/ayuayue/PiDeck/releases/tag/v0.8.0-beta.2",
+						assets: [{ name: "PiDeck-0.8.0-beta.2-arm64.dmg", browser_download_url: "https://github.com/ayuayue/PiDeck/releases/download/v0.8.0-beta.2/x.dmg" }],
+					},
+				]),
+			};
+		},
+		fetchLatestRelease: async () => {
+			throw new Error("dev path must not use /latest");
+		},
+	});
+
+	const result = await check("0.7.3-beta");
+	// dev 走 GitHub Releases API 全量列表（复用任务 6 GITHUB_RELEASES_API），不碰 /latest 302。
+	assert.deepEqual(requestedUrls, [GITHUB_RELEASES_API]);
+	assert.equal(result.latestVersion, "0.8.0-beta.2");
+	assert.equal(result.hasUpdate, true);
+});
+
+test("dev channel surfaces a check error when no prerelease carries installable assets", async () => {
+	const check = createMacManualUpdateChecker({
+		channel: "dev",
+		platform: "darwin",
+		arch: "arm64",
+		fetchReleases: async () => ({
+			ok: true,
+			status: 200,
+			body: JSON.stringify([{ tag_name: "v0.8.0-beta.1", prerelease: true, assets: [] }]),
+		}),
+	});
+	await assert.rejects(() => check("0.7.3-beta"), /prerelease/);
 });

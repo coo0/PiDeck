@@ -142,6 +142,53 @@ test("uses the pi cmd shim bin directory as PATH prefix on Windows when node.exe
 	}
 });
 
+// #268 放宽供应商名（中文/数字/空格/标点）后，名称会经 createInvocation 进入 cmd-shim 命令行。
+// 该通道用 windowsVerbatimArguments 把整条命令行直接交给 cmd.exe，没有 Node 的二次转义：
+// 裸引号会打乱 /s /c 的引号配对，把后续参数里的 & 甩到引号外（实测 cmd 会真的执行 & 后面的
+// 命令），因此含引号的参数必须被包住并双写内部引号。
+test("cmd shim quote-wraps arguments containing double quotes", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-quote-${process.pid}-${Date.now()}`);
+	const binDir = join(root, "nvm", "v22.22.1");
+	mkdirSync(binDir, { recursive: true });
+	const piPath = join(binDir, "pi.cmd");
+	writeFileSync(piPath, "@echo off\r\n", "utf8");
+	writeFileSync(join(binDir, "node.exe"), "", "utf8");
+
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32");
+		const invocation = new PiLocator().createInvocation(piPath, ["--provider", 'a"b', "--model", "m&calc", "--plain", "中文供应商"]);
+		const commandLine = invocation.args[3];
+
+		assert.ok(commandLine.includes('"a""b"'), `含引号的参数必须包住并双写：${commandLine}`);
+		assert.ok(commandLine.includes('"m&calc"'), `含 & 的参数必须被引号包住：${commandLine}`);
+		assert.ok(/(?:^| )中文供应商(?: |$)/.test(commandLine), `普通名称不应被多余引号包裹：${commandLine}`);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+// ~ 不是 cmd 元字符（cmd 不展开 ~，那是 bash 的语义），但 Windows 8.3 短路径
+// （C:\Users\RUNNER~1\...；CI 的 tmpdir、部分用户的临时/主目录）天生带 ~。若把 ~ 算进
+// 「需要引号」，整条命令行会多套一层外引号，行尾那个引号直接粘在最后一个参数上。
+// CI 的 tmpdir 恰好就是 8.3 路径而本地不是，所以这里显式造一个带 ~ 的目录来兜住。
+test("cmd shim: tilde-only path (8.3 short name) gets no outer quote wrap", () => {
+	const root = join(tmpdir(), `pi-desktop-locator-tilde-${process.pid}-~866`, "nvm", "v22.22.1");
+	mkdirSync(root, { recursive: true });
+	const piPath = join(root, "pi.cmd");
+	writeFileSync(piPath, "@echo off\r\n", "utf8");
+	writeFileSync(join(root, "node.exe"), "", "utf8");
+	try {
+		const { PiLocator } = loadPiLocatorModule("win32");
+		const invocation = new PiLocator().createInvocation(piPath, ["--provider", "中文供应商"]);
+		const commandLine = invocation.args[3];
+
+		assert.ok(commandLine.startsWith(piPath), `tilde 路径不应多套外引号：${commandLine}`);
+		assert.match(commandLine, /(?:^| )中文供应商$/, `行尾引号不得粘在参数上：${commandLine}`);
+	} finally {
+		rmSync(join(tmpdir(), `pi-desktop-locator-tilde-${process.pid}-~866`), { recursive: true, force: true });
+	}
+});
+
 // 回归 #169：Linux 下部分用户通过 alias "node /path/pi.js" 直接运行 JS 源文件（而非 npm shim）。
 // createInvocation 必须把指向真实 .js 文件的路径改用 node 启动（无 shebang/可执行位不能直接 execve），
 // 同时不能误拦裸命令名 "pi"（existsSync 对相对路径返回 false）。
@@ -280,6 +327,12 @@ test("getSearchDirs uses ~/.local/share/mise on darwin and linux", () => {
 			rmSync(root, { recursive: true, force: true });
 		}
 	}
+});
+
+test("createProcessEnv removes stale PiDeck proxy scope markers from inherited env", () => {
+	const { PiLocator } = loadPiLocatorModule("darwin", { PIDECK_PI_PROXY_SCOPE: "model-only" });
+	const env = new PiLocator().createProcessEnv();
+	assert.equal(env.PIDECK_PI_PROXY_SCOPE, undefined);
 });
 
 test("createProcessEnv prepends search dirs to PATH/Path without pathPrefix (npm check path)", () => {

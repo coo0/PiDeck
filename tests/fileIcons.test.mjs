@@ -90,6 +90,16 @@ describe("Seti file icon integration", () => {
 		assert.match(source, /@container \(max-width: 340px\)/);
 	});
 
+	test("文件树由外层滚动且不压缩长树，搜索态保留原布局", () => {
+		const drawer = readFileSync("src/renderer/src/components/workspace/DrawerSurface.tsx", "utf8");
+		assert.match(drawer, /drawer-content-frame[^"\n]*overflow-y-auto[^"\n]*\[scrollbar-gutter:stable\]/);
+		assert.match(workspaceSurface, /cn\("files-panel\s+flex\s+flex-col\s+overflow-x-hidden",\s*searchOpen\s*\?\s*"min-h-0 flex-1 overflow-hidden"\s*:\s*"min-h-full flex-none"\)/);
+		// 最小高度只施于整个面板（包含工具行）；树不再强占一屏高度，空树不制造额外滚动。
+		assert.match(workspaceSurface, /<div\s+className=\{searchOpen\s*\?\s*"min-h-0 flex-1 overflow-hidden"\s*:\s*"shrink-0"\}>\s*\{searchOpen\s*\?/);
+		const filesPanel = workspaceSurface.slice(workspaceSurface.indexOf("function FilesPanel("), workspaceSurface.indexOf("const SESSION_FILE_SUMMARY_COLLAPSED_KEY_PREFIX"));
+		assert.doesNotMatch(filesPanel, /overflow-y-auto|overscroll-contain/);
+	});
+
 	test("files drawer drops title chrome and keeps a denser tree", () => {
 		// 文件抽屉：无顶栏；工具行压矮；缩进 8px/层；树行原生 button（不套 shadcn Button 抢 SVG 尺寸）
 		assert.match(workspaceSurface, /props\.panel !== "files" && title/);

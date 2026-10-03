@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
+import { createTsSandbox } from "./helpers/createTsSandbox.mjs";
 import { loadTsCommonJs } from "./helpers/loadTsCommonJs.mjs";
 
 const { computeThinkingDisplay, resolveComposerThinkingLevel } = loadTsCommonJs("src/renderer/src/utils/thinkingDisplay.ts");
@@ -74,10 +75,246 @@ test("契约: ComposerArea 不预先限制运行中的思考强度修改", () =>
 	assert.match(area, /modelDisabled=\{composer\.isStarting\}/);
 });
 
-test("契约: 用户选择的思考档位不被 runtime 回传值覆写", () => {
-	// 思考档位应用链路现由 controller 持有（选择器与 Ctrl+T 快捷键共用同一实现）
-	const picker = [readFileSync("src/renderer/src/hooks/useSessionPreferenceState.ts", "utf8"), readFileSync("src/renderer/src/hooks/useSessionPreferenceController.ts", "utf8")].join("\n");
-	assert.match(picker, /thinkingLevel: level/);
-	assert.doesNotMatch(picker, /appliedThinkingLevel/);
-	assert.doesNotMatch(picker, /thinkingPending|setThinkingPending/);
+/** 保留 hook 生命周期，直接执行生产 controller 与 pending hook，不模拟命令结果处理。 */
+function createThinkingControllerHarness() {
+	const slots = [];
+	let cursor = 0;
+	let effects = [];
+	const react = {
+		useRef(value) {
+			return (slots[cursor++] ??= { current: value });
+		},
+		useState(value) {
+			const index = cursor++;
+			slots[index] ??= { value };
+			return [
+				slots[index].value,
+				(next) => {
+					slots[index].value = next;
+				},
+			];
+		},
+		useCallback: (callback) => callback,
+		useEffect(callback, dependencies) {
+			const index = cursor++;
+			const previous = slots[index];
+			if (previous && dependencies.every((value, i) => Object.is(value, previous.dependencies[i]))) return;
+			effects.push(() => {
+				previous?.cleanup?.();
+				slots[index] = { dependencies, cleanup: callback() };
+			});
+		},
+	};
+	const atoms = { currentSessionIdAtom: Symbol(), sessionRuntimeByIdAtom: Symbol(), modelPendingByIdAtom: Symbol() };
+	const calls = [],
+		writes = [],
+		notices = [],
+		restarts = [];
+	let appliedCount = 0;
+	const model = { provider: "test", id: "next", name: "Next" };
+	const state = {
+		record: { id: "s", status: "active", thinkingLevel: "low", model: { provider: "test", modelId: "old" } },
+		runtime: { agentId: "a", runtimeGeneration: 1, status: "running" },
+		models: [model],
+		favoriteModels: [],
+		hiddenProviders: [],
+		hiddenModels: [],
+		thinkingLevels: [],
+		currentModel: { provider: "test", modelId: "old" },
+		modelPending: undefined,
+		upsertSession(record) {
+			writes.push(record);
+			state.record = record;
+		},
+		setModelPending(pending) {
+			state.modelPending = pending;
+		},
+	};
+	const api = {
+		setRuntimeThinking: async (...args) => {
+			calls.push(args);
+			return { ok: true, value: { value: { thinkingLevel: "medium" } } };
+		},
+		setRuntimeModel: async () => ({ ok: false, error: { code: "SESSION_RUNTIME_BUSY" } }),
+		listRuntimeModels: async () => ({ ok: true, value: { value: [] } }),
+		updateRecord: async (id, patch) => ({ ...state.record, ...patch }),
+	};
+	const load = createTsSandbox({
+		stubs: {
+			react,
+			jotai: { useStore: () => ({ get: (atom) => (atom === atoms.sessionRuntimeByIdAtom ? { s: state.runtime } : atom === atoms.modelPendingByIdAtom ? { s: state.modelPending } : "s") }) },
+			"../atoms": atoms,
+			"./useSessionPreferenceState": { useSessionPreferenceState: () => state },
+			"../components/session/SessionPaneServices": { useSessionPaneServices: () => ({ restartActiveAgent: async (agentId) => restarts.push({ sessionId: state.record.id, agentId, runtimeGeneration: state.runtime.runtimeGeneration }) }) },
+			"../components/session/sessionPickerOptions": { resolveThinkingPickerLevels: () => [] },
+			"../desktopApi": { desktopApi: { sessions: api, app: { onShortcutTriggered: () => () => {} } } },
+			"../utils/notice": { showNotice: (...args) => notices.push(args) },
+			"../i18n": { t: (key) => key },
+			"../atoms/welcome-preference-atoms": {},
+			"../utils/chatSessionBootstrap": {},
+		},
+	});
+	const { useSessionPreferenceController } = load("src/renderer/src/hooks/useSessionPreferenceController.ts");
+	return {
+		state,
+		api,
+		calls,
+		writes,
+		notices,
+		restarts,
+		model,
+		get appliedCount() {
+			return appliedCount;
+		},
+		render() {
+			cursor = 0;
+			effects = [];
+			const controller = useSessionPreferenceController({
+				sessionId: "s",
+				pickerOpen: true,
+				thinkingPickerOpen: true,
+				onApplied() {
+					appliedCount++;
+				},
+			});
+			for (const effect of effects) effect();
+			return controller;
+		},
+		dispose() {
+			for (const slot of slots) slot?.cleanup?.();
+		},
+	};
+}
+
+const flushThinkingEffects = () => new Promise((resolve) => setImmediate(resolve));
+
+test("thinking 即时切换写后端规范化实际档位而不是请求档位", async (t) => {
+	const h = createThinkingControllerHarness();
+	t.after(() => h.dispose());
+	await h.render().applyThinking("xhigh");
+	assertDisplay(h.calls, [[{ sessionId: "s", agentId: "a", runtimeGeneration: 1 }, "xhigh"]]);
+	assert.equal(h.state.record.thinkingLevel, "medium");
+	assert.equal(h.writes.length, 1);
+	assert.equal(h.appliedCount, 1);
+	assert.equal(h.notices.length, 0);
+});
+
+test("thinking 仅 undefined 旧后端字段回退请求档位，实际值不擅自 trim", async (t) => {
+	const h = createThinkingControllerHarness();
+	t.after(() => h.dispose());
+	h.api.setRuntimeThinking = async () => ({ ok: true, value: { value: {} } });
+	await h.render().applyThinking("high");
+	assert.equal(h.state.record.thinkingLevel, "high");
+	h.api.setRuntimeThinking = async () => ({ ok: true, value: { value: { thinkingLevel: " medium " } } });
+	await h.render().applyThinking("xhigh");
+	assert.equal(h.state.record.thinkingLevel, " medium ");
+});
+
+for (const invalid of [null, 3, "", "  "]) {
+	test(`thinking 无效返回 ${JSON.stringify(invalid)} 不写请求档位或报成功`, async (t) => {
+		const h = createThinkingControllerHarness();
+		t.after(() => h.dispose());
+		h.api.setRuntimeThinking = async () => ({ ok: true, value: { value: { thinkingLevel: invalid } } });
+		await h.render().applyThinking("high");
+		assert.equal(h.state.record.thinkingLevel, "low");
+		assert.equal(h.writes.length, 0);
+		assert.equal(h.appliedCount, 0);
+		assert.equal(h.notices.length, 1);
+		assert.equal(h.state.modelPending, undefined);
+	});
+}
+
+for (const errorCode of ["SESSION_COMMAND_FAILED", "SESSION_RUNTIME_BUSY", "SESSION_RUNTIME_UNAVAILABLE", "SESSION_RUNTIME_CHANGED"]) {
+	test(`thinking ${errorCode} 不降级写记录`, async (t) => {
+		const h = createThinkingControllerHarness();
+		t.after(() => h.dispose());
+		h.api.setRuntimeThinking = async () => ({ ok: false, error: { code: errorCode } });
+		await h.render().applyThinking("high");
+		assert.equal(h.writes.length, 0);
+		assert.equal(h.appliedCount, 0);
+		assert.equal(h.notices.length, errorCode === "SESSION_COMMAND_FAILED" || errorCode === "SESSION_RUNTIME_BUSY" ? 1 : 0);
+	});
+}
+
+for (const runtime of [
+	{ agentId: "b", runtimeGeneration: 1, status: "idle" },
+	{ agentId: "a", runtimeGeneration: 2, status: "idle" },
+]) {
+	test(`thinking runtime 换代迟到结果拒绝 ${runtime.agentId}/${runtime.runtimeGeneration}`, async (t) => {
+		const h = createThinkingControllerHarness();
+		t.after(() => h.dispose());
+		let finish;
+		h.api.setRuntimeThinking = () =>
+			new Promise((resolve) => {
+				finish = resolve;
+			});
+		const pending = h.render().applyThinking("high");
+		await flushThinkingEffects();
+		h.state.runtime = runtime;
+		h.render();
+		finish({ ok: true, value: { value: { thinkingLevel: "medium" } } });
+		await pending;
+		assert.equal(h.writes.length, 0);
+		assert.equal(h.appliedCount, 0);
+		assert.equal(h.notices.length, 0);
+	});
+}
+
+test("thinking 未绑定 runtime 才允许记录 fallback", async (t) => {
+	const h = createThinkingControllerHarness();
+	t.after(() => h.dispose());
+	h.state.runtime = undefined;
+	await h.render().applyThinking("high");
+	assert.equal(h.state.record.thinkingLevel, "high");
+	assert.equal(h.calls.length, 0);
+});
+
+test("模型 busy 排队期间 thinking 由同一 owner 保存，idle 重试才应用", async (t) => {
+	const h = createThinkingControllerHarness();
+	t.after(() => h.dispose());
+	let busy = true;
+	let modelCalls = 0;
+	h.api.listRuntimeModels = async () => ({ ok: true, value: { value: [h.model] } });
+	h.api.setRuntimeModel = async () => {
+		modelCalls++;
+		return busy ? { ok: false, error: { code: "SESSION_RUNTIME_BUSY" } } : { ok: true, value: { value: { provider: "test", modelId: "next", modelName: "Next" } } };
+	};
+	h.api.setRuntimeThinking = async (...args) => {
+		h.calls.push(args);
+		return { ok: true, value: { value: { thinkingLevel: "high" } } };
+	};
+	await h.render().applyModel(h.model);
+	await h.render().applyThinking("high");
+	assert.equal(h.state.modelPending.thinking.to, "high");
+	assert.equal(h.state.record.thinkingLevel, "low");
+	assert.equal(h.calls.length, 0);
+	h.render();
+	await flushThinkingEffects();
+	assert.equal(modelCalls, 1);
+	busy = false;
+	h.state.runtime = { ...h.state.runtime, status: "idle" };
+	h.render();
+	await flushThinkingEffects();
+	assert.equal(modelCalls, 2);
+	assert.equal(h.state.modelPending, undefined);
+	assert.equal(h.state.record.thinkingLevel, "high");
+	assert.equal(h.calls.length, 1);
+	assert.equal(h.notices.length, 0);
+});
+
+test("重启确认传当前 agent 给共享 overlay 入口并拒绝旧 runtime triple", async (t) => {
+	for (const stale of [false, true]) {
+		const h = createThinkingControllerHarness();
+		t.after(() => h.dispose());
+		await h.render().applyModel(h.model);
+		const controller = h.render();
+		assertDisplay(controller.restartTarget.handle, { sessionId: "s", agentId: "a", runtimeGeneration: 1 });
+		if (stale) {
+			h.state.runtime = { agentId: "a", runtimeGeneration: 2, status: "idle" };
+			h.render();
+		}
+		await controller.confirmRestart();
+		assertDisplay(h.restarts, stale ? [] : [{ sessionId: "s", agentId: "a", runtimeGeneration: 1 }]);
+		assert.equal(h.writes.length, stale ? 0 : 1);
+	}
 });

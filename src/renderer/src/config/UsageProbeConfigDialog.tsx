@@ -41,6 +41,7 @@ const CATEGORY_LABEL_KEY: Record<UsageProbeTemplateCategory, TranslationKey> = {
 	general: "config.usageProbe.category.general",
 	newapi: "config.usageProbe.category.newapi",
 	cookie: "config.usageProbe.category.cookie",
+	volcengine: "config.usageProbe.category.volcengine",
 };
 
 /** 类别 → 说明文案 i18n key（内置/套餐/订阅无字段，说明即全部）。 */
@@ -51,6 +52,7 @@ const CATEGORY_HINT_KEY: Record<UsageProbeTemplateCategory, TranslationKey> = {
 	general: "config.usageProbe.generalHint",
 	newapi: "config.usageProbe.newapiHint",
 	cookie: "config.usageProbe.cookieHint",
+	volcengine: "config.usageProbe.volcengineHint",
 };
 
 /** 模板 id → 类别（内置 templateId 由主进程识别结果给出；声明式三个固定）。 */
@@ -58,6 +60,8 @@ const DECLARATIVE_TEMPLATE_CATEGORY: Record<string, UsageProbeTemplateCategory> 
 	general: "general",
 	newapi: "newapi",
 	cookie: "cookie",
+	// 火山方舟：凭据是 AK/SK（不是 apiKey），归入自己的类别，说明文案走 volcengineHint。
+	volcengine: "volcengine",
 };
 
 /** 「无模板」哨兵：供应商既不适用通用也不适用 New API 时，明确不选任何预设模板。 */
@@ -142,6 +146,9 @@ export function UsageProbeConfigDialog(props: {
 	const [cookiePath, setCookiePath] = useState("");
 	const [valuePath, setValuePath] = useState("");
 	const [currencyPath, setCurrencyPath] = useState("");
+	// 火山方舟 AK/SK：SK 默认掩码（与 Cookie/访问令牌同一套显隐切换）。
+	const [accessKeyId, setAccessKeyId] = useState("");
+	const [secretAccessKey, setSecretAccessKey] = useState("");
 	const [showToken, setShowToken] = useState(false);
 	const [timeoutSecs, setTimeoutSecs] = useState(10);
 	const [intervalMinutes, setIntervalMinutes] = useState(5);
@@ -178,30 +185,33 @@ export function UsageProbeConfigDialog(props: {
 				setCookiePath(config?.cookiePath ?? "");
 				setValuePath(config?.valuePath ?? "");
 				setCurrencyPath(config?.currencyPath ?? "");
+				setAccessKeyId(config?.accessKeyId ?? "");
+				setSecretAccessKey(config?.secretAccessKey ?? "");
 				setTimeoutSecs(config?.timeoutSecs ?? 10);
 				setIntervalMinutes(config?.intervalMinutes ?? 5);
 				setLoadErrors(result.errors);
-				// 旧版 probes 数组只在没有显式模板时用于迁移提示。标准 Bearer balance
-				// 探针不含 Cookie，不能误填 Cookie 模板；它继续由 legacy probes 自动路由。
+				// 旧版 probes 数组命中回显：无声明式模板时预选 Cookie 模板并回填字段，
+				// 让手写/历史配置可见可迁（保存即转为声明式配置）。
 				const legacy = result.legacyProbes ?? [];
 				if (legacy.length > 0 && !config?.template) {
 					const first = legacy[0];
 					const cookieHeader = first.request?.headers?.["Cookie"] ?? first.request?.headers?.cookie ?? "";
+					if (cookieHeader) setCookie(cookieHeader);
+					if (first.request?.path) setCookiePath(first.request.path);
+					// parse 是判别联合：currencyPath 只在 kind "balance" 分支可取。
 					const parse = first.parse;
-					if (cookieHeader) {
-						setCookie(cookieHeader);
-						if (first.request?.path) setCookiePath(first.request.path);
-						if (parse?.kind === "balance") {
-							if (parse.valuePath) setValuePath(parse.valuePath);
-							if (parse.currencyPath) setCurrencyPath(parse.currencyPath);
-						}
-						setTemplate("cookie");
-					} else if (parse?.kind === "balance" && first.request?.path === "/usage") {
-						// /usage + balance 是通用 Bearer 探针，不是 Cookie 登录态。
-						setTemplate(NONE_TEMPLATE);
+					if (parse?.kind === "balance") {
+						if (parse.valuePath) setValuePath(parse.valuePath);
+						if (parse.currencyPath) setCurrencyPath(parse.currencyPath);
 					}
 					const firstNamed = legacy.find((item) => item.name)?.name;
-					setLegacyNotice(t("config.usageProbe.legacyDetected", { count: String(legacy.length), name: firstNamed ?? t("config.usageProbe.legacyUnnamed") }));
+					setLegacyNotice(
+						t("config.usageProbe.legacyDetected", {
+							count: String(legacy.length),
+							name: firstNamed ?? t("config.usageProbe.legacyUnnamed"),
+						}),
+					);
+					setTemplate("cookie");
 				}
 				setLoaded(true);
 			})
@@ -235,7 +245,7 @@ export function UsageProbeConfigDialog(props: {
 	 * 保存时只写开关/超时/间隔，查询走内置候选 + 旧探针自动匹配。 */
 	const currentTemplate = useMemo((): { id: string; category: UsageProbeTemplateCategory } | null => {
 		if (template === NONE_TEMPLATE) return null;
-		if (template === "general" || template === "newapi" || template === "cookie") {
+		if (template === "general" || template === "newapi" || template === "cookie" || template === "volcengine") {
 			return { id: template, category: DECLARATIVE_TEMPLATE_CATEGORY[template] };
 		}
 		if (recognized && recognized.templateId === template) {
@@ -270,6 +280,8 @@ export function UsageProbeConfigDialog(props: {
 				...(cookiePath.trim() ? { cookiePath: cookiePath.trim() } : {}),
 				...(valuePath.trim() ? { valuePath: valuePath.trim() } : {}),
 				...(currencyPath.trim() ? { currencyPath: currencyPath.trim() } : {}),
+				...(accessKeyId.trim() ? { accessKeyId: accessKeyId.trim() } : {}),
+				...(secretAccessKey.trim() ? { secretAccessKey: secretAccessKey.trim() } : {}),
 				...(timeoutSecs !== 10 ? { timeoutSecs } : {}),
 			});
 			setTestResult(result);
@@ -307,10 +319,8 @@ export function UsageProbeConfigDialog(props: {
 			timeoutSecs,
 			intervalMinutes,
 		};
-		// 无模板也要写入显式哨兵，否则保留的旧 probes 会在下次打开时触发迁移回显。
-		if (isNone) {
-			config.template = NONE_TEMPLATE;
-		} else if (current && (current.id === "general" || current.id === "newapi" || current.id === "cookie")) {
+		// 内置识别命中 / 无模板：不写 template（自动路由）；声明式：写模板 id + 模板字段。
+		if (!isNone && current && (current.id === "general" || current.id === "newapi" || current.id === "cookie" || current.id === "volcengine")) {
 			config.template = current.id;
 			if (current.id === "general") {
 				if (apiKey.trim()) config.apiKey = apiKey.trim();
@@ -324,7 +334,7 @@ export function UsageProbeConfigDialog(props: {
 				}
 				config.accessToken = accessToken.trim();
 				config.userId = userId.trim();
-			} else {
+			} else if (current.id === "cookie") {
 				if (baseUrl.trim()) config.baseUrl = baseUrl.trim();
 				if (!cookie.trim() || !cookiePath.trim() || !valuePath.trim()) {
 					setSaveState("error");
@@ -335,6 +345,17 @@ export function UsageProbeConfigDialog(props: {
 				config.cookiePath = cookiePath.trim();
 				config.valuePath = valuePath.trim();
 				if (currencyPath.trim()) config.currencyPath = currencyPath.trim();
+			} else if (current.id === "volcengine") {
+				// 火山方舟：AK/SK 两项必填（缺任一项主进程模板构建就会失败，这里提前拦下人话提示）。
+				// baseUrl 可选覆盖，通常留空——控制面 Host 是固定网关，Region 已从推理域名推断。
+				if (baseUrl.trim()) config.baseUrl = baseUrl.trim();
+				if (!accessKeyId.trim() || !secretAccessKey.trim()) {
+					setSaveState("error");
+					setSaveError(!accessKeyId.trim() ? t("config.usageProbe.volcengineAccessKeyIdRequired") : t("config.usageProbe.volcengineSecretKeyRequired"));
+					return;
+				}
+				config.accessKeyId = accessKeyId.trim();
+				config.secretAccessKey = secretAccessKey.trim();
 			}
 		}
 		setSaveState("loading");
@@ -448,6 +469,9 @@ export function UsageProbeConfigDialog(props: {
 									<button type="button" className={pillClass(template === "cookie")} onClick={() => setTemplate("cookie")} data-testid="usage-probe-template-cookie">
 										{t("config.usageProbe.category.cookie")}
 									</button>
+									<button type="button" className={pillClass(template === "volcengine")} onClick={() => setTemplate("volcengine")} data-testid="usage-probe-template-volcengine">
+										{t("config.usageProbe.category.volcengine")}
+									</button>
 								</div>
 								{template === NONE_TEMPLATE && (
 									<p className="px-0.5 text-caption text-text-tertiary" data-testid="usage-probe-none-hint">
@@ -518,6 +542,29 @@ export function UsageProbeConfigDialog(props: {
 										<OptionalField label={t("config.usageProbe.cookieValuePathLabel")} placeholder={t("config.usageProbe.cookieValuePathPlaceholder")} value={valuePath} onChange={setValuePath} />
 										<OptionalField label={t("config.usageProbe.cookieCurrencyPathLabel")} placeholder={t("config.usageProbe.cookieCurrencyPathPlaceholder")} value={currencyPath} onChange={setCurrencyPath} />
 									</div>
+								</section>
+							)}
+							{currentTemplate?.id === "volcengine" && (
+								<section className="space-y-3">
+									<div className="grid grid-cols-2 gap-3">
+										<div className="space-y-1.5">
+											<Label className="text-xs font-medium text-foreground">{t("config.usageProbe.volcengineAccessKeyId")}</Label>
+											<Input value={accessKeyId} onChange={(event) => setAccessKeyId(event.target.value)} placeholder={t("config.usageProbe.volcengineAccessKeyIdPlaceholder")} className="h-9" />
+										</div>
+										<div className="space-y-1.5">
+											<div className="flex items-center justify-between">
+												<Label className="text-xs font-medium text-foreground">{t("config.usageProbe.volcengineSecretKey")}</Label>
+												<button type="button" className="inline-flex items-center gap-1 text-micro text-text-tertiary transition-colors hover:text-foreground" onClick={() => setShowToken((value) => !value)}>
+													{showToken ? <EyeOff size={12} /> : <Eye size={12} />}
+													{showToken ? t("config.usageProbe.hideKey") : t("config.usageProbe.showKey")}
+												</button>
+											</div>
+											{/* SK 默认掩码，与 Cookie / 访问令牌共用同一套显隐切换，防截图泄密 */}
+											<Input type={showToken ? "text" : "password"} value={secretAccessKey} onChange={(event) => setSecretAccessKey(event.target.value)} placeholder={t("config.usageProbe.volcengineSecretKeyPlaceholder")} className="h-9" />
+										</div>
+									</div>
+									{/* baseUrl 可选：控制面 Host 是固定网关，Region 已从推理域名推断，一般留空 */}
+									<OptionalField label={t("config.usageProbe.credentialBaseUrl")} placeholder={t("config.usageProbe.credentialBaseUrlPlaceholder")} value={baseUrl} onChange={setBaseUrl} />
 								</section>
 							)}
 							{/* 超时 / 自动查询间隔（cc-switch 同款两列） */}

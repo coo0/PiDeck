@@ -3,6 +3,7 @@ import { atomWithStorage } from "jotai/utils";
 import type { BusySendDelivery } from "../../../shared/busySendDelivery";
 import type { AgentBackend } from "../../../shared/types";
 import type { QuickMessagesSnapshot } from "../../../shared/types/quickMessages";
+import type { ReplyActionsSnapshot } from "../../../shared/types/replyActions";
 import { resolveEffectiveAgentBackend } from "../../../shared/types/dshRuntime";
 import { isModuleHidden } from "../../../shared/hiddenModules";
 import { dshRuntimeStatusAtom } from "./dsh-atoms";
@@ -116,6 +117,13 @@ export const busySendDeliveryAtom = atom<BusySendDelivery>("steer");
 export const quickMessagesSnapshotAtom = atom<QuickMessagesSnapshot | null>(null);
 
 /**
+ * 回复快捷操作规则快照（配置文件 userData/reply-actions.json，主进程 ReplyActionRuleStore 读写）。
+ * 与 quickMessagesSnapshotAtom 同一套约定：读写入口统一走 useReplyActions，
+ * SessionReplyActions 只读 rules 展示，设置页经 save 落盘后整份替换快照。
+ */
+export const replyActionsSnapshotAtom = atom<ReplyActionsSnapshot | null>(null);
+
+/**
  * 侧栏展开的项目 id 集合（有 id = 展开）。
  * Shared because project collapse also pauses App-level session polling.
  * 初值取 localStorage 首屏缓存，随后由 settings.json 覆盖为权威值。
@@ -148,13 +156,13 @@ export const sidebarNavTabAtom = atom<SidebarNavTab>(readSidebarNavTab(typeof wi
 export type TurnFlowSettings = {
 	/** 流式对话时展开中间过程（默认开：最新轮流式输出时自动展开思考/工具详情）。 */
 	expandInterimDuringStream: boolean;
-	/** 新一轮开始时收起上一轮（默认开：发送新消息后收起所有非最新轮，含手动展开的）。 */
-	collapsePrevRunsOnNewTurn: boolean;
+	/** 是否按过程组合并显示思考/工具调用（默认开：连续思考/工具调用合并成过程组）。 */
+	processGroupDisplay: boolean;
 };
 
 export const turnFlowSettingsAtom = atom<TurnFlowSettings>({
 	expandInterimDuringStream: true,
-	collapsePrevRunsOnNewTurn: true,
+	processGroupDisplay: true,
 });
 
 /**

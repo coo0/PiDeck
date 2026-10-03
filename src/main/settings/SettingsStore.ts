@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { mkdir, readFile, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_IMAGE_GEN_OUTPUT_FORMAT, DEFAULT_IMAGE_GEN_SIZE, DEFAULT_IMAGE_GEN_WATERMARK, parseImageGenOutputFormat, parseImageGenSize, parseImageGenWatermark } from "../../shared/imageGenParams";
-import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, normalizeSoundAlertSettings, type AppSettings, type TerminalConfirmCloseMode, type TerminalCursorStyle, type TerminalThemeId } from "../../shared/types";
+import { createDefaultExternalEditorSettings, createDefaultSoundAlertSettings, DEFAULT_PET_SCALE, DEFAULT_TOAST_DURATION_MS, TOAST_DURATION_STICKY_MS, normalizeSoundAlertSettings, type AppSettings, type TerminalConfirmCloseMode, type TerminalCursorStyle, type TerminalThemeId } from "../../shared/types";
 import { normalizePinnedSessionIds } from "../../shared/pinnedSessions";
 import { normalizeHiddenModules } from "../../shared/hiddenModules";
 import { parseBusySendDelivery } from "../../shared/busySendDelivery";
@@ -105,8 +105,8 @@ const defaultSettings: AppSettings = {
 	startupWindowMode: "last",
 	piEnvironmentChecked: false,
 	sessionTabOpenMode: "preview",
-	// 默认关闭：标题请求会额外调用当前 pi 模型并消耗 token，避免用户无感知地产生用量。
-	autoSessionTitle: false,
+	// 默认开启：首轮 Agent 成功后异步生成标题，用户可在设置中关闭。
+	autoSessionTitle: true,
 	// 忙碌时发送默认「插入当前回合」（对齐 pi 历史行为）；dsh 会话此前默认排队，
 	// 统一后由本设置项决定，用户可在常用设置→会话中改回。
 	busySendDelivery: "steer",
@@ -152,11 +152,12 @@ Gitmoji 对应关系：
 	agentCountReminderEnabled: true,
 	// 公告通知默认开启：新公告弹 toast 提醒（弹出时机另有忙碌延迟控制）
 	announcementNotificationEnabled: true,
+	toastDurationMs: DEFAULT_TOAST_DURATION_MS,
+	processGroupDisplay: true,
 	showThinking: readPiAgentShowThinking() ?? true,
 	// 流式对话设置：默认自动展开中间过程（思考/工具详情随最新轮流式展开）；
 	// 新一轮开始默认收起非最新轮（含手动展开的），用户可在设置中关闭。
 	expandInterimDuringStream: true,
-	collapsePrevRunsOnNewTurn: true,
 	showDevTools: false,
 	developerDiagnostics: false,
 	// 默认关闭 Chromium 沙箱：与历史 Windows no-sandbox 兼容策略一致
@@ -170,6 +171,7 @@ Gitmoji 对应关系：
 	desktopProxyUrl: "http://127.0.0.1:7890",
 	desktopProxyBypass: "localhost,127.0.0.1,::1",
 	customPiPath: "",
+	piCustomPaths: [],
 	wslEnabled: false,
 	wslDistro: "Ubuntu",
 	wslUser: "root",
@@ -177,6 +179,8 @@ Gitmoji 对应关系：
 	webServiceEnabled: false,
 	webServiceHost: "127.0.0.1",
 	webServicePort: 8765,
+	webServiceRequiresAuth: true,
+	cuaEnabled: false,
 	rpcTimeout: 600_000,
 	linkOpenMode: "external",
 	workspaceContentOpenMode: "split",
@@ -185,6 +189,7 @@ Gitmoji 对应关系：
 	// 分屏窄栏时由容器查询自动收敛，详见 foundation.css --chat-content-pct。
 	chatContentWidthPct: 80,
 	// 会话 Tab 最大宽度默认 104px：与旧硬编码 max-w-[104px] 一致，迁移零回归。
+	navigationMode: "tabs",
 	sessionTabMaxWidth: SESSION_TAB_MAX_WIDTH_DEFAULT,
 	// 上下文消耗扣血动画默认开启（外观设置可关；关后只是不播动画，消耗照常）
 	contextSpendAnimation: true,
@@ -265,7 +270,7 @@ Gitmoji 对应关系：
 	// 字体配置：默认使用系统字体；用户可通过自定义字体设置修改。
 	// 出厂默认取 "default" 档：与 CSS token 基线（:root 无覆盖时）一致，
 	// 避免「默认」档位名与实际出厂外观错位（旧默认 medium 比 default 大一档）。
-	fontSize: "default",
+	fontSize: "medium",
 	uiFontSize: null,
 	chatFontSize: null,
 	inputFontSize: null,
@@ -288,6 +293,12 @@ Gitmoji 对应关系：
 	terminalConfirmClose: "running",
 	terminalStartupCommand: "",
 };
+
+/** toast 只接受有限的 1000–60000 毫秒或常驻哨兵，非法输入回落默认。 */
+function normalizeToastDurationMs(value: unknown): number {
+	if (value === TOAST_DURATION_STICKY_MS) return value;
+	return typeof value === "number" && Number.isFinite(value) && value >= 1000 && value <= 60000 ? value : DEFAULT_TOAST_DURATION_MS;
+}
 
 const TERMINAL_THEME_IDS: readonly string[] = ["inherit", "solarized-light", "solarized-dark", "one-dark", "monokai"];
 const TERMINAL_CURSOR_STYLES: readonly string[] = ["block", "bar", "underline"];
@@ -372,6 +383,11 @@ export class SettingsStore {
 			if (typeof this.settings.announcementNotificationEnabled !== "boolean") {
 				this.settings.announcementNotificationEnabled = defaultSettings.announcementNotificationEnabled;
 			}
+			this.settings.toastDurationMs = normalizeToastDurationMs(this.settings.toastDurationMs);
+			// 磁盘旧值或脏枚举回落 Tab 导航；合法模式保持不变。
+			if (this.settings.navigationMode !== "tabs" && this.settings.navigationMode !== "simple") {
+				this.settings.navigationMode = defaultSettings.navigationMode;
+			}
 			// 消耗动画开关：旧 settings.json 无此字段（新增项）时回落默认开启。
 			if (typeof this.settings.contextSpendAnimation !== "boolean") {
 				this.settings.contextSpendAnimation = defaultSettings.contextSpendAnimation;
@@ -413,6 +429,7 @@ export class SettingsStore {
 			this.migrateContentWidth();
 			// 会话 Tab 最大宽度：磁盘 JSON 无类型，手工改坏（非数字/超界）时钳回合法区间。
 			this.settings.sessionTabMaxWidth = clampSessionTabMaxWidth(this.settings.sessionTabMaxWidth);
+			await this.migrateRemovedCollapsePrevRunsSwitch();
 			// 兼容迁移：全局用量自动查询开关已删除（改为每个 provider 徽章/弹窗里的开关）。
 			this.migrateRemovedUsageAutoQuerySwitch();
 			// 兼容迁移：按供应商/模型过滤的代理白名单，旧数据缺省为 []（不按名单过滤，保持全局行为）。
@@ -516,6 +533,13 @@ export class SettingsStore {
 		void this.save().catch(() => undefined);
 	}
 
+	/** 新轮折叠恒定开启：仅删除旧字段时写盘，保存失败由 load 传播。 */
+	private async migrateRemovedCollapsePrevRunsSwitch() {
+		if (!("collapsePrevRunsOnNewTurn" in this.settings)) return;
+		delete this.settings.collapsePrevRunsOnNewTurn;
+		await this.save();
+	}
+
 	get() {
 		// showThinking 由 pi agent 的 hideThinkingBlock 动态决定，每次 get() 都重新读取
 		const computed = readPiAgentShowThinking();
@@ -538,6 +562,13 @@ export class SettingsStore {
 		// IPC 入参不可信：自动标题开关只接受布尔值，非法值保持原有设置。
 		if ("autoSessionTitle" in safePatch && typeof safePatch.autoSessionTitle !== "boolean") {
 			delete safePatch.autoSessionTitle;
+		}
+		// toast 的非法 patch 回落默认；导航非法 patch 则保留用户现有模式。
+		if ("toastDurationMs" in safePatch) {
+			safePatch.toastDurationMs = normalizeToastDurationMs(safePatch.toastDurationMs);
+		}
+		if ("navigationMode" in safePatch && safePatch.navigationMode !== "tabs" && safePatch.navigationMode !== "simple") {
+			delete safePatch.navigationMode;
 		}
 		// 会话 Tab 最大宽度：非有限数值直接丢弃（保持原设置），合法值钳到 80–400。
 		if ("sessionTabMaxWidth" in safePatch) {

@@ -5,6 +5,8 @@ import { t } from "../../../i18n";
 import { desktopApi } from "../../../desktopApi";
 import { SKIN_PRESETS } from "../../../themePresets";
 import { clampSessionTabMaxWidth, SESSION_TAB_MAX_WIDTH_MAX, SESSION_TAB_MAX_WIDTH_MIN } from "../../../../../shared/sessionTabWidth";
+// 缩放档位与快捷键（shared/shortcuts zoomIn/zoomOut）共用同一套边界/步长，避免两处漂移
+import { clampZoomFactor, ZOOM_FACTOR_MAX, ZOOM_FACTOR_MIN, ZOOM_FACTOR_STEP } from "../../../../../shared/zoom";
 import { Button } from "../../ui-shadcn/button";
 import { Input } from "../../ui-shadcn/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../ui-shadcn/select";
@@ -13,10 +15,6 @@ import { DirtyMarker, SettingRow, SettingSwitchRow } from "./SettingRows";
 import { ModuleVisibilitySection } from "./ModuleVisibilitySection";
 import { Check, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const ZOOM_FACTOR_MIN = 0.8;
-const ZOOM_FACTOR_MAX = 1.5;
-const ZOOM_FACTOR_STEP = 0.05;
 
 type AppearanceTabProps = {
 	draft: AppSettings;
@@ -48,7 +46,6 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 	// 保留 ACCENT_PRESETS 仅供自定义主题参考（无独立主色下拉）。
 	const fontSizeOptions: SelectOption[] = [
 		{ value: "compact", label: t("settings.fontSizeCompact") },
-		{ value: "default", label: t("settings.fontSizeDefault") },
 		{ value: "medium", label: t("settings.fontSizeMedium") },
 		{ value: "large", label: t("settings.fontSizeLarge") },
 		{ value: "xlarge", label: t("settings.fontSizeXlarge") },
@@ -65,14 +62,33 @@ export const AppearanceTab = memo(function AppearanceTab(props: AppearanceTabPro
 	];
 
 	const changeZoomFactor = (delta: number) => {
-		const next = Math.min(ZOOM_FACTOR_MAX, Math.max(ZOOM_FACTOR_MIN, Math.round((draft.zoomFactor + delta) * 100) / 100));
-		updateDraft({ zoomFactor: next });
+		updateDraft({ zoomFactor: clampZoomFactor(draft.zoomFactor + delta) });
 	};
 
 	return (
 		<>
 			{/* 主题与背景 */}
 			<SettingsSection title={t("settings.sectionThemeBackground")}>
+				<SettingRow
+					anchor="appearance-navigation-mode"
+					title={
+						<>
+							<span>{t("settings.navigationMode")}</span>
+							<DirtyMarker dirty={isDirty("navigationMode")} label={t("settings.navigationMode")} />
+						</>
+					}
+					description={t("settings.navigationModeDesc")}
+				>
+					<Select value={draft.navigationMode} onValueChange={(value) => updateDraft({ navigationMode: value as AppSettings["navigationMode"] })}>
+						<SelectTrigger className="w-40">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							<SelectItem value="tabs">{t("settings.navigationTabs")}</SelectItem>
+							<SelectItem value="simple">{t("settings.navigationSimple")}</SelectItem>
+						</SelectContent>
+					</Select>
+				</SettingRow>
 				<SettingRow
 					title={
 						<>

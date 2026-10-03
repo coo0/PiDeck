@@ -15,6 +15,7 @@ import { SessionCommandFailure, requireSessionCommand, sessionCommandFailureToas
 import { resolveComposerLiveModel } from "../utils/modelPendingDisplay";
 import { modelKey, pickCycleModel, pickCycleThinkingLevel, resolveFavoriteCycleCandidates, type CycleDirection } from "../utils/preferenceCycle";
 import { welcomeModelPreferenceAtom, welcomeThinkingLevelAtom } from "../atoms/welcome-preference-atoms";
+import { WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY } from "../utils/chatSessionBootstrap";
 
 /** 快捷键触发的循环目标（模型 / 思考档位）。 */
 type PendingCycle = "model" | "thinking";
@@ -47,6 +48,9 @@ export type SessionPreferenceController = {
 	agentId: string | undefined;
 	toggleFavorite: (provider: string, modelId: string) => Promise<void>;
 	toggleHideModel: (provider: string, modelId: string) => Promise<void>;
+	/** 模型选择器在草稿/未启动会话中的清除入口。 */
+	canClearModel: boolean;
+	clearModel: () => Promise<void>;
 	/** 选择器选中：应用模型（含 busy 排队 / 需重启引导 / 降级写记录） */
 	applyModel: (model: AvailableModel) => Promise<void>;
 	/** 选择器选中：应用思考档位 */
@@ -90,6 +94,7 @@ export function useSessionPreferenceController(options: {
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
+	modelThinkingLevels?: Record<string, string>;
 	/** 应用成功后关闭选择器（选择器点击路径需要；快捷键路径幂等） */
 	onApplied: () => void;
 }): SessionPreferenceController {
@@ -109,6 +114,7 @@ export function useSessionPreferenceController(options: {
 		cycleArmed,
 		defaultModel: options.defaultModel,
 		defaultThinkingLevel: options.defaultThinkingLevel,
+		modelThinkingLevels: options.modelThinkingLevels,
 	});
 	const { record, runtime, isDshSession, models, favoriteModels, favoritesLoaded, hiddenProviders, hiddenModels, modelPending, currentModel: resolvedLiveModel, thinkingLevels, currentThinkingLevel } = state;
 	// 与 Tab 栏「重启」共用 App.restartActiveAgent：置 restartingAgentId，
@@ -153,9 +159,9 @@ export function useSessionPreferenceController(options: {
 		const selected = selectedModelPreference(model);
 		const thinkingLevel = thinkingAfterModelChange(model);
 		const previousThinking = recordRef.current?.thinkingLevel;
-		requireSessionCommand(await desktopApi.sessions.setRuntimeModel(handle, selected.provider, selected.modelId, selected.modelName));
+		const applied = requireSessionCommand(await desktopApi.sessions.setRuntimeModel(handle, selected.provider, selected.modelId, selected.modelName));
 		if (!handleIsCurrent(handle) || !isCurrent()) return false;
-		writeSelectedModelToState(selected);
+		writeSelectedModelToState(applied.value);
 		if (thinkingLevel !== undefined && thinkingLevel !== previousThinking) {
 			// 模型命令不返回实际档位；沿用已有设置命令确认回落成功后才更新记录。
 			try {
@@ -278,6 +284,24 @@ export function useSessionPreferenceController(options: {
 		onApplied();
 	}
 
+	const canClearModel = (!record || record.status === "draft") && !runtime?.agentId;
+
+	async function clearModel() {
+		if ((record && record.status !== "draft") || currentHandle()) return;
+		try {
+			if (record) {
+				const updated = await desktopApi.sessions.updateRecord(sessionId, { model: null });
+				state.upsertSession(updated);
+			} else {
+				localStorage.removeItem(isDshSession ? WELCOME_DSH_MODEL_KEY : WELCOME_MODEL_KEY);
+			}
+			state.setModelPending(undefined);
+			onApplied();
+		} catch (error) {
+			showNotice(error instanceof Error ? error.message : String(error), 4000);
+		}
+	}
+
 	function applyModel(model: AvailableModel) {
 		const handle = currentHandle();
 		return enqueuePreference(() => applyModelNow(model, handle));
@@ -330,6 +354,24 @@ export function useSessionPreferenceController(options: {
 		}
 	}
 
+	/** 直接档位命令以后端实际结果为准；仅旧后端缺字段时兼容请求值。 */
+	async function applyRuntimeThinking(handle: SessionRuntimeTarget, level: string) {
+		if (!handleIsCurrent(handle)) return false;
+		const applied = requireSessionCommand(await desktopApi.sessions.setRuntimeThinking(handle, level));
+		if (!handleIsCurrent(handle)) return false;
+		const actualLevel = applied.value.thinkingLevel;
+		if (actualLevel !== undefined && (typeof actualLevel !== "string" || !actualLevel.trim())) {
+			throw new SessionCommandFailure({ code: "SESSION_COMMAND_FAILED" });
+		}
+		const current = recordRef.current;
+		if (current) {
+			const updated = { ...current, thinkingLevel: actualLevel ?? level, updatedAt: Date.now() };
+			recordRef.current = updated;
+			state.upsertSession(updated);
+		}
+		return true;
+	}
+
 	function applyThinking(level: string) {
 		const handle = currentHandle();
 		return enqueuePreference(async () => {
@@ -348,14 +390,7 @@ export function useSessionPreferenceController(options: {
 			}
 			try {
 				if (handle) {
-					requireSessionCommand(await desktopApi.sessions.setRuntimeThinking(handle, level));
-					if (!handleIsCurrent(handle)) return;
-					const current = recordRef.current;
-					if (current) {
-						const updated = { ...current, thinkingLevel: level, updatedAt: Date.now() };
-						recordRef.current = updated;
-						state.upsertSession(updated);
-					}
+					if (!(await applyRuntimeThinking(handle, level))) return;
 				} else {
 					const updated = await desktopApi.sessions.updateRecord(sessionId, { thinkingLevel: level });
 					if (activeSessionRef.current !== sessionId || recordRef.current?.id !== sessionId) return;
@@ -506,6 +541,8 @@ export function useSessionPreferenceController(options: {
 	// 大量回调的最新闭包；直接返回当次渲染的引用更不容易出「点了没反应」的陈旧闭包。
 	return {
 		isDshSession,
+		canClearModel,
+		clearModel,
 		models,
 		report: state.report,
 		catalogLoading: state.catalogLoading,

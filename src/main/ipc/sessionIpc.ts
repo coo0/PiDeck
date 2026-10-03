@@ -11,6 +11,7 @@ import { isDshPermissionPreset } from "../../shared/types/agent";
 import { isRewindRestoreScope } from "../../shared/types/rewind";
 import { canonicalizeSessionPath } from "../../shared/sessionIdentity";
 import { createSessionModelPreference } from "../../shared/modelDisplayName";
+import { modelThinkingLevelOf } from "../../shared/modelThinkingLevels";
 import type {
 	CreateSessionDraftInput,
 	CreateAnonymousSessionInput,
@@ -38,6 +39,7 @@ import type {
 	AvailableModel,
 	ArchivedDshSession,
 } from "../../shared/types";
+import type { BridgeEventInput, BridgeResyncInput } from "../../shared/types/bridge";
 import { parseSessionProcessEventsFromFile } from "../sessions/sessionProcessEventsFile";
 import { dshUnavailablePageFor } from "../dsh/dshManualStop";
 import { downgradeRunningStartedBefore, downgradeStaleRunning } from "../pi/derivedSubagents";
@@ -95,6 +97,7 @@ import type { ConfigManager } from "../config/ConfigManager";
 import type { TerminalSessionManager } from "../terminal/TerminalSessionManager";
 import type { CodexSessionImporter } from "../sessions/CodexSessionImporter";
 import type { ClaudeSessionImporter } from "../sessions/ClaudeSessionImporter";
+import type { QoderSessionImporter } from "../sessions/QoderSessionImporter";
 import type { OpenCodeSessionImporter } from "../sessions/OpenCodeSessionImporter";
 import type { ZCodeSessionImporter } from "../sessions/ZCodeSessionImporter";
 import type { WorkBuddySessionImporter } from "../sessions/WorkBuddySessionImporter";
@@ -125,15 +128,12 @@ export type DshBackendIpcDeps = {
 	listDshAgentPresets?: () => Promise<
 		Array<{
 			id: string;
-			trust: "system" | "user";
 			isDefault: boolean;
 			name?: string;
 			description?: string;
 			broken?: string;
 		}>
 	>;
-	/** DSH 删除本地（user）预设（agentPreset.remove）；system 预设由 host 拒绝。 */
-	removeDshAgentPreset?: (id: string) => Promise<void>;
 	/** DSH 部署默认模型选择（settings.yaml agent-default-model）；未装配/不可读时 undefined。 */
 	getDshDefaultModel?: () => Promise<
 		| {
@@ -304,6 +304,7 @@ export type SessionIpcDeps = {
 	getPiModelCapabilities?: () => AvailableModel[] | undefined;
 	codexSessionImporter: CodexSessionImporter;
 	claudeSessionImporter: ClaudeSessionImporter;
+	qoderSessionImporter: QoderSessionImporter;
 	openCodeSessionImporter: OpenCodeSessionImporter;
 	zcodeSessionImporter: ZCodeSessionImporter;
 	workbuddySessionImporter: WorkBuddySessionImporter;
@@ -376,6 +377,7 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		getPiModelCapabilities,
 		codexSessionImporter,
 		claudeSessionImporter,
+		qoderSessionImporter,
 		openCodeSessionImporter,
 		zcodeSessionImporter,
 		workbuddySessionImporter,
@@ -404,7 +406,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		discoverDshModels,
 		listDshProviders,
 		listDshAgentPresets,
-		removeDshAgentPreset,
 		getDshDefaultModel,
 		getDshStatus,
 		getDshRuntimeStatus,
@@ -628,7 +629,12 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 					model = defaults.model;
 				}
 				if (!thinkingLevel) {
-					thinkingLevel = defaults.thinkingLevel;
+					// 每模型默认档位优先于全局默认，且必须按**最终生效的模型**查（显式传入的
+					// model / welcomeModel 可能不是解析器选出的默认模型）：pi 在新建与切换模型时
+					// 都按「显式选择 > 每模型默认 > 全局默认」解析再 clamp，这里同序才能保证
+					// 首轮请求用的档位与引导页底栏展示的一致。DSH 无 pi 模型身份，跳过。
+					const perModelThinkingLevel = input.backend !== "dsh" && model && typeof model.provider === "string" && typeof model.modelId === "string" ? modelThinkingLevelOf(settingsResult.parsed, model.provider, model.modelId) : undefined;
+					thinkingLevel = perModelThinkingLevel ?? defaults.thinkingLevel;
 				}
 			} catch {
 				// Config read is best-effort; draft creation must never block.
@@ -638,7 +644,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			projectId: input.projectId,
 			title: input.title?.trim() || mainCopy("session.newTitle"),
 			environment: settingsStore.get().wslEnabled ? "wsl" : "native",
-			titleLocked: false,
 			// 后端透传：仅接受白名单枚举，其余视为 pi（渲染层不可信输入校验在边界）。
 			backend: input.backend === "dsh" ? "dsh" : undefined,
 			model,
@@ -1399,6 +1404,47 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		}
 	});
 	ipcMain.handle(ipcChannels.sessionsUiResponse, (_event, input: SessionUiResponseInput) => sessionRuntimeCoordinator.respondToUi(input));
+	/**
+	 * GUI 扩展桥：渲染进程回灌交互事件 → 排入该 agent 的桥队列。
+	 *
+	 * 边界校验（AGENTS.md「输入校验在边界」）：
+	 * - 三个身份字段必填（sessionId / agentId / runtimeGeneration）
+	 * - runtimeGeneration 必须与该会话当前 runtime 一致，拒绝旧 runtime 的迟到事件
+	 * 失败一律返回 false（渲染层据此静默丢弃），**不抛错跨 IPC**。
+	 */
+	ipcMain.handle(ipcChannels.sessionsBridgeEvent, (_event, input: BridgeEventInput) => {
+		if (!input || typeof input !== "object") return false;
+		const { sessionId, agentId, runtimeGeneration, event } = input;
+		if (typeof sessionId !== "string" || !sessionId) return false;
+		if (typeof agentId !== "string" || !agentId) return false;
+		if (typeof runtimeGeneration !== "number" || !Number.isFinite(runtimeGeneration)) return false;
+		if (!event || typeof event !== "object" || typeof event.type !== "string") return false;
+		const current = sessionRuntimeCoordinator.getTarget(sessionId);
+		if (!current || current.agentId !== agentId || current.runtimeGeneration !== runtimeGeneration) {
+			// 旧 runtime 的迟到事件：丢弃，不报错
+			return false;
+		}
+		return sessionRuntimeCoordinator.pushBridgeEvent(agentId, event);
+	});
+	/**
+	 * GUI 扩展桥：渲染进程要求桥**全量重推一次**（§9.4）。
+	 *
+	 * 边界校验与 `sessionsBridgeEvent` 完全一致（三个身份字段 + runtime 一致性）——
+	 * 不新写一套规则，避免两处漂移。失败一律返回 false，**不抛错跨 IPC**。
+	 */
+	ipcMain.handle(ipcChannels.sessionsBridgeResync, (_event, input: BridgeResyncInput) => {
+		if (!input || typeof input !== "object") return false;
+		const { sessionId, agentId, runtimeGeneration } = input;
+		if (typeof sessionId !== "string" || !sessionId) return false;
+		if (typeof agentId !== "string" || !agentId) return false;
+		if (typeof runtimeGeneration !== "number" || !Number.isFinite(runtimeGeneration)) return false;
+		const current = sessionRuntimeCoordinator.getTarget(sessionId);
+		if (!current || current.agentId !== agentId || current.runtimeGeneration !== runtimeGeneration) {
+			// 旧 runtime 的迟到请求：忽略，不报错
+			return false;
+		}
+		return sessionRuntimeCoordinator.requestBridgeResync(agentId);
+	});
 	ipcMain.handle(ipcChannels.sessionsRuntimeList, () => sessionRuntimeCoordinator.listRuntimes());
 	ipcMain.handle(ipcChannels.sessionsRuntimeActivate, async (_event, sessionId: string) => {
 		const startedAt = Date.now();
@@ -1431,13 +1477,6 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 	});
 	ipcMain.handle(ipcChannels.dshListProviders, async () => (listDshProviders ? listDshProviders() : []));
 	ipcMain.handle(ipcChannels.dshAgentPresets, async () => (listDshAgentPresets ? listDshAgentPresets() : []));
-	// 预设删除：边界校验 id（非空字符串、去首尾空白）；system 预设由 host 侧拒绝并回传结构化错误。
-	ipcMain.handle(ipcChannels.dshAgentPresetRemove, async (_event, id: string) => {
-		const presetId = typeof id === "string" ? id.trim() : "";
-		if (!presetId) throw new Error("Invalid DSH agent preset id");
-		if (!removeDshAgentPreset) throw new Error("DSH agent presets are not available");
-		await removeDshAgentPreset(presetId);
-	});
 	ipcMain.handle(ipcChannels.dshDefaultModel, async () => (getDshDefaultModel ? getDshDefaultModel() : undefined));
 	ipcMain.handle(ipcChannels.dshGetStatus, async () => (getDshStatus ? getDshStatus() : { started: false, homeDir: "", bootError: null }));
 	// DSH runtime 安装态查询：未装配 dshBackend = 无 DSH 后端，按 notInstalled 返回
@@ -1454,9 +1493,10 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		// 对话框在主进程弹：渲染层不参与路径选择，也就没有「传任意路径读文件」的入口。
 		const picked = await dialog.showOpenDialog({
 			title: mainCopy("dsh.runtime.pickArchiveTitle"),
-			// 过滤器只影响文件选择；openDirectory 让已解压目录也能被选中。
-			filters: [{ name: "DSH runtime", extensions: ["tgz", "tar.gz"] }],
-			properties: ["openFile", "openDirectory"],
+			// 只收归档：与目录入口分开弹。Windows 上 openFile + openDirectory 同时给会
+			// 退化成只能选目录，.tgz 选不到（见 shared/ipc.ts 的 dshRuntimeInstallLocalDir）。
+			filters: [{ name: "DSH runtime", extensions: ["tgz", "gz"] }],
+			properties: ["openFile"],
 		});
 		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
 		const filePath = picked.filePaths[0];
@@ -1465,6 +1505,19 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
 		}
 		return importDshRuntime(filePath);
+	});
+	ipcMain.handle(ipcChannels.dshRuntimeInstallLocalDir, async () => {
+		if (!importDshRuntime) throw new Error("DSH runtime installation is not available");
+		const picked = await dialog.showOpenDialog({
+			title: mainCopy("dsh.runtime.pickDirectoryTitle"),
+			properties: ["openDirectory"],
+		});
+		if (picked.canceled || picked.filePaths.length === 0) return { ok: false, error: "cancelled" };
+		const dirPath = picked.filePaths[0];
+		if (!dirPath || !existsSync(dirPath)) {
+			throw new Error(mainCopy("dsh.runtime.invalidArchivePath"));
+		}
+		return importDshRuntime(dirPath);
 	});
 	ipcMain.handle(ipcChannels.dshRuntimeUninstall, async () => {
 		if (!uninstallDshRuntime) throw new Error("DSH runtime installation is not available");
@@ -1735,6 +1788,23 @@ export function registerSessionIpc(deps: SessionIpcDeps): void {
 		if (!project) throw new Error(`Project not found: ${projectId}`);
 		const result = await claudeSessionImporter.import(project.path, sourcePaths);
 		void appLogger.info("session", "Claude sessions imported", {
+			projectId,
+			sourceCount: sourcePaths.length,
+		});
+		return result;
+	});
+	ipcMain.handle(ipcChannels.qoderSessionsScan, async (_event, projectId: string) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await qoderSessionImporter.scan(project.path);
+		void appLogger.debug("session", "Qoder sessions scanned", { projectId });
+		return result;
+	});
+	ipcMain.handle(ipcChannels.qoderSessionsImport, async (_event, projectId: string, sourcePaths: string[]) => {
+		const project = projectStore.get(projectId);
+		if (!project) throw new Error(`Project not found: ${projectId}`);
+		const result = await qoderSessionImporter.import(project.path, sourcePaths);
+		void appLogger.info("session", "Qoder sessions imported", {
 			projectId,
 			sourceCount: sourcePaths.length,
 		});

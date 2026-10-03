@@ -21,6 +21,7 @@ import { isLiveRuntimeStatus } from "../utils/sessionCommands";
 import { resolveComposerLiveModel, resolveGuideDisplayModel, type ModelPending } from "../utils/modelPendingDisplay";
 import { resolveComposerThinkingLevel } from "../utils/thinkingDisplay";
 import { modelKey } from "../utils/preferenceCycle";
+import { modelThinkingLevelOfMap } from "../../../shared/modelThinkingLevels";
 import { GUIDE_BOOTSTRAP_SESSION_ID, WELCOME_DSH_MODEL_KEY, WELCOME_MODEL_KEY, isWelcomeModelLost, readWelcomeBackendPreference, shouldClearWelcomePreference } from "../utils/chatSessionBootstrap";
 
 /**
@@ -41,6 +42,7 @@ export function useSessionPreferenceState(options: {
 	/** DSH 部署默认模型（草稿期高亮） */
 	defaultModel?: { provider?: string; modelId?: string; modelName?: string };
 	defaultThinkingLevel?: string;
+	modelThinkingLevels?: Record<string, string>;
 }) {
 	const { sessionId } = options;
 	const welcomeThinkingLevel = useAtomValue(welcomeThinkingLevelAtom);
@@ -232,7 +234,7 @@ export function useSessionPreferenceState(options: {
 		record: record?.thinkingLevel,
 		pending: modelPending?.thinking,
 		// 无 record（引导页）：显式点选 > 配置默认 > 模型默认（与底栏同规则）。
-		fallback: welcomeThinking ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
+		fallback: welcomeThinking ?? modelThinkingLevelOfMap(options.modelThinkingLevels, resolvedLiveModel.provider, resolvedLiveModel.modelId) ?? options.defaultThinkingLevel ?? currentModelEntry?.defaultEffort,
 	});
 
 	function setModelPending(pending: ModelPending | undefined) {
